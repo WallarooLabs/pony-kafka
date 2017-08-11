@@ -32,14 +32,14 @@ actor TestP is KafkaProducer
   new create() =>
     None
 
-  fun ref set_producer_mapping(mapping: KafkaProducerMapping): (KafkaProducerMapping | None) => None
+  fun ref update_producer_mapping(mapping: KafkaProducerMapping): (KafkaProducerMapping | None) => None
 
   be kafka_producer_ready() => None
 
   be kafka_message_delivery_report(delivery_report: KafkaProducerDeliveryReport) =>
     None
 
-  fun ref get_producer_mapping(): (KafkaProducerMapping | None) => None
+  fun ref producer_mapping(): (KafkaProducerMapping | None) => None
 
   fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[I32, I32]] val) => None
 

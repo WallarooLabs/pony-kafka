@@ -33,13 +33,13 @@ trait KafkaConsumer
 
 // trait for a kafka producer
 trait KafkaProducer
-  fun ref set_producer_mapping(mapping: KafkaProducerMapping): (KafkaProducerMapping | None)
+  fun ref update_producer_mapping(mapping: KafkaProducerMapping): (KafkaProducerMapping | None)
 
-  fun ref get_producer_mapping(): (KafkaProducerMapping | None)
+  fun ref producer_mapping(): (KafkaProducerMapping | None)
 
   // called by kafka client to let producers know of updated producer mapping
   be _create_producer_mapping(mapping: KafkaProducerMapping iso) =>
-    let old = set_producer_mapping(consume mapping)
+    let old = update_producer_mapping(consume mapping)
 
     match old
     | let pm: KafkaProducerMapping => pm.conf.logger(Error) and pm.conf.logger.log(Error, "Creating producer mapping when it has already been created. This should never happen.")
@@ -48,9 +48,9 @@ trait KafkaProducer
     end
 
   be _update_brokers_and_topic_mapping(brokers: Map[I32, (_KafkaBroker val, KafkaBrokerConnection tag)] val, topic_mapping: Map[String, Map[I32, I32]] val) =>
-    let producer_mapping = get_producer_mapping()
-    match producer_mapping
-    | let pm: KafkaProducerMapping => pm.update_brokers_and_topic_mapping(brokers, topic_mapping)
+    let pm = producer_mapping()
+    match pm
+    | let pm': KafkaProducerMapping => pm'.update_brokers_and_topic_mapping(brokers, topic_mapping)
     end
 
   be kafka_producer_ready()
@@ -58,9 +58,9 @@ trait KafkaProducer
   be kafka_message_delivery_report(delivery_report: KafkaProducerDeliveryReport)
 
   be _kafka_producer_throttle(topic_mapping: Map[String, Map[I32, I32]] val, ack_requested: Bool, client: KafkaClient, p: KafkaProducer tag) =>
-    let producer_mapping = get_producer_mapping()
-    match producer_mapping
-    | let pm: KafkaProducerMapping => pm.update_topic_mapping(topic_mapping)
+    let pm = producer_mapping()
+    match pm
+    | let pm': KafkaProducerMapping => pm'.update_topic_mapping(topic_mapping)
     end
 
     if ack_requested then
@@ -72,9 +72,9 @@ trait KafkaProducer
   fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[I32, I32]] val)
 
   be _kafka_producer_unthrottle(topic_mapping: Map[String, Map[I32, I32]] val, ack_requested: Bool, client: KafkaClient, p: KafkaProducer tag, fully_unthrottled: Bool) =>
-    let producer_mapping = get_producer_mapping()
-    match producer_mapping
-    | let pm: KafkaProducerMapping => pm.update_topic_mapping(topic_mapping)
+    let pm = producer_mapping()
+    match pm
+    | let pm': KafkaProducerMapping => pm'.update_topic_mapping(topic_mapping)
     end
 
     if ack_requested then

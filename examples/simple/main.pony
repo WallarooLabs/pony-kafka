@@ -84,9 +84,9 @@ actor P is KafkaProducer
   new create(logger': Logger[String]) =>
     logger = logger'
 
-  fun ref set_producer_mapping(mapping: KafkaProducerMapping): (KafkaProducerMapping | None) => _kafka_producer_mapping = mapping
+  fun ref update_producer_mapping(mapping: KafkaProducerMapping): (KafkaProducerMapping | None) => _kafka_producer_mapping = mapping
 
-  fun ref get_producer_mapping(): (KafkaProducerMapping | None) => _kafka_producer_mapping
+  fun ref producer_mapping(): (KafkaProducerMapping | None) => _kafka_producer_mapping
 
   fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[I32, I32]] val) => None
 
