@@ -74,11 +74,12 @@ primitive BigEndianEncoder
     """
     Write a U128 to the buffer in big-endian byte order.
     """
-    wb.write_sixteen_bytes((data >> 120).u8(), (data >> 112).u8(), (data >> 104).u8(),
-      (data >> 96).u8(), (data >> 88).u8(), (data >> 80).u8(), (data >> 72).u8(),
-      (data >> 64).u8(), (data >> 56).u8(), (data >> 48).u8(), (data >> 40).u8(),
-      (data >> 32).u8(), (data >> 24).u8(), (data >> 16).u8(), (data >> 8).u8(),
-      data.u8())
+    wb.write_sixteen_bytes((data >> 120).u8(), (data >> 112).u8(),
+      (data >> 104).u8(), (data >> 96).u8(), (data >> 88).u8(),
+      (data >> 80).u8(), (data >> 72).u8(), (data >> 64).u8(),
+      (data >> 56).u8(), (data >> 48).u8(), (data >> 40).u8(),
+      (data >> 32).u8(), (data >> 24).u8(), (data >> 16).u8(),
+      (data >> 8).u8(), data.u8())
 
   fun i128(wb: Writer, data: I128) =>
     """

@@ -1,11 +1,15 @@
 use "../customlogger"
 use "lib:snappy"
 
-use @snappy_validate_compressed_buffer[SnappyStatus](data: Pointer[U8] tag, size: USize)
-use @snappy_uncompressed_length[SnappyStatus](data: (USize | Pointer[U8] tag), size: USize, len: Pointer[USize])
+use @snappy_validate_compressed_buffer[SnappyStatus](data: Pointer[U8] tag,
+  size: USize)
+use @snappy_uncompressed_length[SnappyStatus](data: (USize | Pointer[U8] tag),
+  size: USize, len: Pointer[USize])
 use @snappy_max_compressed_length[USize](uncompressed_size: USize)
-use @snappy_uncompress[SnappyStatus](data: (USize | Pointer[U8] tag), size: USize, output: (USize | Pointer[U8] tag), output_size: Pointer[USize])
-use @snappy_compress[SnappyStatus](data: Pointer[U8] tag, size: USize, output: (USize | Pointer[U8] tag), output_size: Pointer[USize])
+use @snappy_uncompress[SnappyStatus](data: (USize | Pointer[U8] tag),
+  size: USize, output: (USize | Pointer[U8] tag), output_size: Pointer[USize])
+use @snappy_compress[SnappyStatus](data: Pointer[U8] tag, size: USize,
+  output: (USize | Pointer[U8] tag), output_size: Pointer[USize])
 
 type SnappyStatus is I32
 
@@ -13,13 +17,19 @@ primitive SnappyCompressor
   fun compress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
     Snappy.compress(logger, data)
 
-  fun compress_array(logger: Logger[String], data: Array[ByteSeq] val, total_size: USize): Array[U8] iso ? =>
+  fun compress_array(logger: Logger[String], data: Array[ByteSeq] val,
+    total_size: USize): Array[U8] iso ?
+  =>
     Snappy.compress_array(logger, data, total_size)
 
-  fun compress_java(logger: Logger[String], data: ByteSeq, block_size: USize = 32*1024): Array[U8] iso ? =>
+  fun compress_java(logger: Logger[String], data: ByteSeq,
+    block_size: USize = 32*1024): Array[U8] iso ?
+  =>
     Snappy.compress_java(logger, data, block_size)
 
-  fun compress_array_java(logger: Logger[String], data: Array[ByteSeq] val, total_size: USize, block_size: USize = 32*1024): Array[U8] iso ? =>
+  fun compress_array_java(logger: Logger[String], data: Array[ByteSeq] val,
+    total_size: USize, block_size: USize = 32*1024): Array[U8] iso ?
+  =>
     Snappy.compress_array_java(logger, data, total_size, block_size)
 
 primitive SnappyDecompressor
@@ -31,7 +41,8 @@ primitive SnappyDecompressor
 
 primitive Snappy
   fun read32be(buffer: ByteSeq, offset: USize): U32 ? =>
-    // TODO: figure out some way of detecting endianness; big endian needs byte swapping
+    // TODO: figure out some way of detecting endianness; big endian needs byte
+    // swapping
     (buffer(offset + 0).u32() << 24) or (buffer(offset + 1).u32() << 16) or
     (buffer(offset + 2).u32() << 8) or buffer(offset + 3).u32()
 
@@ -41,7 +52,8 @@ primitive Snappy
 
 
     if data.size() <= (snappy_java_hdr_size + 4) then
-      logger(Info) and logger.log(Info, "Not snappy java compressed data (not enough data). Falling back to normal snappy decompression.")
+      logger(Info) and logger.log(Info, "Not snappy java compressed data " +
+        "(not enough data). Falling back to normal snappy decompression.")
       return decompress(logger, data)
     end
 
@@ -53,7 +65,8 @@ primitive Snappy
       and (data(5) == snappy_java_magic(5))
       and (data(6) == snappy_java_magic(6))
       and (data(7) == snappy_java_magic(7))) then
-      logger(Info) and logger.log(Info, "Not snappy java compressed data (invalid magic). Falling back to normal snappy decompression.")
+      logger(Info) and logger.log(Info, "Not snappy java compressed data " +
+        "(invalid magic). Falling back to normal snappy decompression.")
       return decompress(logger, data)
     end
 
@@ -67,13 +80,17 @@ primitive Snappy
       offset = offset + 4
 
       if (chunk_size + offset) > data.size() then
-        logger(Error) and logger.log(Error, "Snappy Java deconding error! Invalid chunk length encountered.")
+        logger(Error) and logger.log(Error,
+          "Snappy Java deconding error! Invalid chunk length encountered.")
         error
       end
 
-      err = @snappy_uncompressed_length(data.cpointer().usize() + offset, chunk_size, addressof uncompressed_size)
+      err = @snappy_uncompressed_length(data.cpointer().usize() + offset,
+        chunk_size, addressof uncompressed_size)
       if err != 0 then
-        logger(Error) and logger.log(Error, "Error determining uncompressed size of snappy java compressed chunk.")
+        logger(Error) and logger.log(Error,
+          "Error determining uncompressed size of snappy java compressed chunk."
+          )
         error
       end
 
@@ -82,12 +99,14 @@ primitive Snappy
     end
 
     if offset != data.size() then
-      logger(Error) and logger.log(Error, "Error processing all of snappy java compressed data.")
+      logger(Error) and logger.log(Error,
+        "Error processing all of snappy java compressed data.")
       error
     end
 
     if total_uncompressed_size == 0 then
-      logger(Error) and logger.log(Error, "Error snappy java uncompressed data is empty.")
+      logger(Error) and logger.log(Error,
+        "Error snappy java uncompressed data is empty.")
       error
     end
 
@@ -101,20 +120,28 @@ primitive Snappy
       var uncompressed_size: USize = 0
       var chunk_size = read32be(data, offset).usize()
       if (chunk_size + offset) > data.size() then
-        logger(Error) and logger.log(Error, "Snappy Java deconding error! Invalid chunk length encountered.")
+        logger(Error) and logger.log(Error,
+          "Snappy Java deconding error! Invalid chunk length encountered.")
         error
       end
       offset = offset + 4
 
-      err = @snappy_uncompressed_length(data.cpointer().usize() + offset, chunk_size, addressof uncompressed_size)
+      err = @snappy_uncompressed_length(data.cpointer().usize() + offset,
+        chunk_size, addressof uncompressed_size)
       if err != 0 then
-        logger(Error) and logger.log(Error, "Error determining uncompressed size of snappy java compressed chunk.")
+        logger(Error) and logger.log(Error,
+          "Error determining uncompressed size of snappy java compressed chunk."
+          )
         error
       end
 
-      err = @snappy_uncompress(data.cpointer().usize() + offset, chunk_size, buffer.cpointer().usize() + total_uncompressed_size, addressof uncompressed_size)
+      err = @snappy_uncompress(data.cpointer().usize() + offset, chunk_size,
+        buffer.cpointer().usize() + total_uncompressed_size,
+        addressof uncompressed_size)
       if err != 0 then
-        logger(Error) and logger.log(Error, "Error uncompressing snappy java compressed chunk. Error code: " + err.string())
+        logger(Error) and logger.log(Error,
+          "Error uncompressing snappy java compressed chunk. Error code: " +
+          err.string())
         error
       end
 
@@ -123,11 +150,15 @@ primitive Snappy
     end
 
     if offset != data.size() then
-      logger(Error) and logger.log(Error, "Error processing all of snappy java compressed data.")
+      logger(Error) and logger.log(Error,
+        "Error processing all of snappy java compressed data.")
       error
     end
 
-    logger(Fine) and logger.log(Fine, "Snappy java uncompressed data. Uncompressed size: " + total_uncompressed_size.string() + ", compressed size: " + data.size().string())
+    logger(Fine) and logger.log(Fine,
+      "Snappy java uncompressed data. Uncompressed size: " +
+      total_uncompressed_size.string() + ", compressed size: " +
+      data.size().string())
 
     buffer.truncate(total_uncompressed_size)
 
@@ -135,9 +166,11 @@ primitive Snappy
 
   fun decompress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
     var max_size: USize = 0
-    var err = @snappy_uncompressed_length(data.cpointer().usize(), data.size(), addressof max_size)
+    var err = @snappy_uncompressed_length(data.cpointer().usize(), data.size(),
+      addressof max_size)
     if err != 0 then
-      logger(Error) and logger.log(Error, "Error determining uncompressed size of snappy compressed data.")
+      logger(Error) and logger.log(Error,
+        "Error determining uncompressed size of snappy compressed data.")
       error
     end
 
@@ -145,9 +178,11 @@ primitive Snappy
     buffer.undefined(buffer.space())
     var out_len = buffer.size()
 
-    err = @snappy_uncompress(data.cpointer().usize(), data.size(), buffer.cpointer().usize(), addressof out_len)
+    err = @snappy_uncompress(data.cpointer().usize(), data.size(),
+      buffer.cpointer().usize(), addressof out_len)
     if err != 0 then
-      logger(Error) and logger.log(Error, "Error uncompressing snappy compressed data.")
+      logger(Error) and logger.log(Error,
+        "Error uncompressing snappy compressed data.")
       error
     end
 
@@ -161,7 +196,8 @@ primitive Snappy
     buffer.undefined(buffer.space())
     var out_len = buffer.size()
 
-    var err = @snappy_compress(data.cpointer(), data.size(), buffer.cpointer().usize(), addressof out_len)
+    var err = @snappy_compress(data.cpointer(), data.size(),
+      buffer.cpointer().usize(), addressof out_len)
     if err != 0 then
       logger(Error) and logger.log(Error, "Error compressing data with snappy.")
       error
@@ -171,7 +207,8 @@ primitive Snappy
 
     buffer
 
-  // TODO: Figure out a way to do this without copying all the data into a single buffer
+  // TODO: Figure out a way to do this without copying all the data into a
+  // single buffer
   fun compress_array(logger: Logger[String], data: Array[ByteSeq] val, total_size: USize): Array[U8] iso ? =>
     let arr = recover iso
         let a = Array[U8](total_size)
@@ -186,7 +223,9 @@ primitive Snappy
 
     compress(logger, consume arr)
 
-  fun compress_java(logger: Logger[String], data: ByteSeq, block_size: USize = 32*1024): Array[U8] iso ? =>
+  fun compress_java(logger: Logger[String], data: ByteSeq,
+    block_size: USize = 32*1024): Array[U8] iso ?
+  =>
     let snappy_java_hdr_size: USize = 16
     let snappy_java_magic = [ as U8: 0x82, 'S', 'N', 'A', 'P', 'P', 'Y', 0 ]
 
@@ -229,9 +268,12 @@ primitive Snappy
 
       // write compressed data to current write offset + 4
       out_len = buffer.size() - total_compressed_size
-      var err = @snappy_compress(d.cpointer(), d.size(), buffer.cpointer().usize() + total_compressed_size + 4, addressof out_len)
+      var err = @snappy_compress(d.cpointer(), d.size(),
+        buffer.cpointer().usize() + total_compressed_size + 4,
+        addressof out_len)
       if err != 0 then
-        logger(Error) and logger.log(Error, "Error compressing chunk with snappy.")
+        logger(Error) and logger.log(Error,
+          "Error compressing chunk with snappy.")
         error
       end
 
@@ -245,14 +287,19 @@ primitive Snappy
       offset = offset + d.size()
     end
 
-    logger(Fine) and logger.log(Fine, "Snappy java compressed data. Uncompressed size: " + data.size().string() + ", compressed size: " + total_compressed_size.string())
+    logger(Fine) and logger.log(Fine,
+      "Snappy java compressed data. Uncompressed size: " + data.size().string()
+      + ", compressed size: " + total_compressed_size.string())
 
     buffer.truncate(total_compressed_size)
 
     buffer
 
-  // TODO: Figure out a way to do this without copying all the data into a single buffer
-  fun compress_array_java(logger: Logger[String], data: Array[ByteSeq] val, total_size: USize, block_size: USize = 32*1024): Array[U8] iso ? =>
+  // TODO: Figure out a way to do this without copying all the data into a
+  // single buffer
+  fun compress_array_java(logger: Logger[String], data: Array[ByteSeq] val,
+    total_size: USize, block_size: USize = 32*1024): Array[U8] iso ?
+  =>
     let arr = recover iso
         let a = Array[U8](total_size)
         for d in data.values() do

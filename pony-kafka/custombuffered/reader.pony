@@ -228,12 +228,14 @@ class Reader
     end
     r
 
-  fun ref read_bytes(len: USize): (Array[U8] val | Array[Array[U8] val] val) ? =>
+  fun ref read_bytes(len: USize): (Array[U8] val | Array[Array[U8] val] val) ?
+  =>
     """
     Return a block as a contiguous chunk of memory.
     """
     if _available < len then
-      @printf[I32](("Not enough data available (" + _available.string() + ") for requested amount (" + len.string() + ")\n").cstring())
+      @printf[I32](("Not enough data available (" + _available.string() +
+        ") for requested amount (" + len.string() + ")\n").cstring())
       error
     end
 
@@ -274,9 +276,13 @@ class Reader
   // TODO: Add peek_contiguous_bytes function
   fun ref read_contiguous_bytes(len: USize): Array[U8] val ? =>
     """
-    Return a block as a contiguous chunk of memory without copying if possible or throw an error.
+    Return a block as a contiguous chunk of memory without copying if possible
+    or throw an error.
     """
-    // TODO: enhance to fall back to a copy if have non-contiguous data and return an iso? Not possible because iso/val distinction doesn't exist at runtime? Maybe need to enhance callers to be able to work with non-contiguous memory?
+    // TODO: enhance to fall back to a copy if have non-contiguous data and
+    // return an iso? Not possible because iso/val distinction doesn't exist at
+    // runtime? Maybe need to enhance callers to be able to work with
+    // non-contiguous memory?
 
     if len == 0 then
       return recover Array[U8] end
@@ -302,7 +308,9 @@ class Reader
       return next_segment
     end
 
-    @printf[I32](("Not enough contiguous data. Avail: " + avail.string() + ", need: " + need.string() + ", total available: " + _available.string() + "\n").cstring())
+    @printf[I32](("Not enough contiguous data. Avail: " + avail.string() +
+      ", need: " + need.string() + ", total available: " + _available.string() +
+      "\n").cstring())
     node() = (data, offset)
     error
 
@@ -329,7 +337,9 @@ class Reader
 
     error
 
-  fun box peek_bytes(len: USize, offset: USize = 0): (Array[U8] val | Array[Array[U8] val] val) ? =>
+  fun box peek_bytes(len: USize, offset: USize = 0):
+    (Array[U8] val | Array[Array[U8] val] val) ?
+  =>
     """
     Return a block as a contiguous chunk of memory.
     """

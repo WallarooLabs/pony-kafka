@@ -45,8 +45,10 @@ class iso _TestReader is UnitTest
     h.assert_eq[U32](LittleEndianDecoder.peek_u32(b, 9), 0xDEADBEEF)
     h.assert_eq[U64](BigEndianDecoder.peek_u64(b, 13), 0xDEADBEEFFEEDFACE)
     h.assert_eq[U64](LittleEndianDecoder.peek_u64(b, 21), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U128](BigEndianDecoder.peek_u128(b, 29), 0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
-    h.assert_eq[U128](LittleEndianDecoder.peek_u128(b, 45), 0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+    h.assert_eq[U128](BigEndianDecoder.peek_u128(b, 29),
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+    h.assert_eq[U128](LittleEndianDecoder.peek_u128(b, 45),
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
 
     h.assert_eq[U8](LittleEndianDecoder.peek_u8(b, 61), 'h')
     h.assert_eq[U8](LittleEndianDecoder.peek_u8(b, 62), 'i')
@@ -59,8 +61,10 @@ class iso _TestReader is UnitTest
     h.assert_eq[U32](LittleEndianDecoder.u32(b), 0xDEADBEEF)
     h.assert_eq[U64](BigEndianDecoder.u64(b), 0xDEADBEEFFEEDFACE)
     h.assert_eq[U64](LittleEndianDecoder.u64(b), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U128](BigEndianDecoder.u128(b), 0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
-    h.assert_eq[U128](LittleEndianDecoder.u128(b), 0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+    h.assert_eq[U128](BigEndianDecoder.u128(b),
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+    h.assert_eq[U128](LittleEndianDecoder.u128(b),
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
 
     h.assert_eq[String](b.line(), "hi")
     h.assert_eq[String](b.line(), "there")
@@ -152,8 +156,10 @@ class iso _TestWriter is UnitTest
     h.assert_eq[U32](LittleEndianDecoder.peek_u32(b, 9), 0xDEADBEEF)
     h.assert_eq[U64](BigEndianDecoder.peek_u64(b, 13), 0xDEADBEEFFEEDFACE)
     h.assert_eq[U64](LittleEndianDecoder.peek_u64(b, 21), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U128](BigEndianDecoder.peek_u128(b, 29), 0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
-    h.assert_eq[U128](LittleEndianDecoder.peek_u128(b, 45), 0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+    h.assert_eq[U128](BigEndianDecoder.peek_u128(b, 29),
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+    h.assert_eq[U128](LittleEndianDecoder.peek_u128(b, 45),
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
 
     h.assert_eq[U8](BigEndianDecoder.peek_u8(b, 61), 'h')
     h.assert_eq[U8](BigEndianDecoder.peek_u8(b, 62), 'i')
@@ -206,8 +212,10 @@ class iso _TestWriter is UnitTest
     h.assert_eq[U32](LittleEndianDecoder.u32(b), 0xDEADBEEF)
     h.assert_eq[U64](BigEndianDecoder.u64(b), 0xDEADBEEFFEEDFACE)
     h.assert_eq[U64](LittleEndianDecoder.u64(b), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U128](BigEndianDecoder.u128(b), 0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
-    h.assert_eq[U128](LittleEndianDecoder.u128(b), 0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+    h.assert_eq[U128](BigEndianDecoder.u128(b),
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+    h.assert_eq[U128](LittleEndianDecoder.u128(b),
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
 
     h.assert_eq[String](b.line(), "hi")
     h.assert_eq[String](b.line(), "there")

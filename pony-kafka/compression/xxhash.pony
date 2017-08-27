@@ -2,11 +2,16 @@
 
 primitive XXHash
   // TODO: hash64
-  // TODO: should null terminator for strings be included? to match behavior of C string hashing?
-  fun hash32(buffer: String, seed: U32, buffer_offset: USize, num_bytes: USize): U32 ? =>
+  // TODO: should null terminator for strings be included? to match behavior of
+  // C string hashing?
+  fun hash32(buffer: String, seed: U32, buffer_offset: USize, num_bytes: USize):
+    U32 ?
+  =>
     hash32(buffer.array(), seed, buffer_offset, num_bytes)
 
-  fun hash32(buffer: Array[U8] box, seed: U32 = 0, buffer_offset: USize = 0, num_bytes: USize = -1): U32 ? =>
+  fun hash32(buffer: Array[U8] box, seed: U32 = 0, buffer_offset: USize = 0,
+    num_bytes: USize = -1): U32 ?
+  =>
     var h32: U32 = 0
     var offset: USize = buffer_offset
     var size: USize = buffer.size().min(num_bytes)
@@ -59,7 +64,8 @@ primitive XXHash
     h32
 
   fun read32(buffer: Array[U8] box, offset: USize): U32 ? =>
-    // TODO: figure out some way of detecting endianness; big endian needs byte swapping
+    // TODO: figure out some way of detecting endianness; big endian needs byte
+    // swapping
     (buffer(offset + 3).u32() << 24) or (buffer(offset + 2).u32() << 16) or
     (buffer(offset + 1).u32() << 8) or buffer(offset + 0).u32()
 

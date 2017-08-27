@@ -136,12 +136,16 @@ primitive VarIntDecoder
     """
     _peek_svarint(rb, 64, offset)
 
-  fun _peek_svarint(rb: Reader, bits_to_read: U64, offset: USize = 0): (I64, USize) ? =>
+  fun _peek_svarint(rb: Reader, bits_to_read: U64, offset: USize = 0):
+    (I64, USize) ?
+  =>
     (let d', let num_bytes) = _peek_varint(rb, bits_to_read, offset)
     let d = d'.i64()
     ((d >> 1) xor -(d and 1), num_bytes)
 
-  fun _peek_varint(rb: Reader, bits_to_read: U64, offset: USize = 0): (U64, USize) ? =>
+  fun _peek_varint(rb: Reader, bits_to_read: U64, offset: USize = 0):
+    (U64, USize) ?
+  =>
     var d: U64 = 0
     var bits: U64 = 0
     var b: U64 = 0

@@ -163,10 +163,13 @@ interface val LogFormatter
 
   See `DefaultLogFormatter` for an example of how to implement a LogFormatter.
   """
-  fun apply(level: LogLevel, msg: String, verbose: Bool, date: String, loc: SourceLoc): String
+  fun apply(level: LogLevel, msg: String, verbose: Bool, date: String, loc:
+    SourceLoc): String
 
 primitive DefaultLogFormatter is LogFormatter
-  fun apply(level: LogLevel, msg: String, verbose: Bool, date: String, loc: SourceLoc): String =>
+  fun apply(level: LogLevel, msg: String, verbose: Bool, date: String, loc:
+    SourceLoc): String
+  =>
     let file_name: String = loc.file()
     let file_linenum: String  = loc.line().string()
     let file_linepos: String  = loc.pos().string()

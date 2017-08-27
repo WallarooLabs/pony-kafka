@@ -49,7 +49,8 @@ interface CustomTCPConnectionNotify
     """
     data
 
-  fun ref sentv(conn: CustomTCPConnection ref, data: ByteSeqIter): ByteSeqIter =>
+  fun ref sentv(conn: CustomTCPConnection ref, data: ByteSeqIter): ByteSeqIter
+  =>
     """
     Called when multiple chunks of data are sent to the connection in a single
     call. This gives the notifier an opportunity to modify the sent data chunks

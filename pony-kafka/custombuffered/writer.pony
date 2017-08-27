@@ -95,7 +95,8 @@ class Writer
     _byte(data2)
     this
 
-  fun ref write_four_bytes(data: U8, data2: U8, data3: U8, data4: U8): Writer^ =>
+  fun ref write_four_bytes(data: U8, data2: U8, data3: U8, data4: U8): Writer^
+  =>
     """
     Write a byte to the buffer.
     """
@@ -148,8 +149,10 @@ class Writer
     _byte(data16)
     this
 
-  // TODO: Ability to overwrite at a previous position (only if that position used to be part of one of our accumulation iso's)
-  // TODO: Copy small sized ByteSeq instead to minimize multiple small arrays for IO calls
+  // TODO: Ability to overwrite at a previous position (only if that position
+  // used to be part of one of our accumulation iso's)
+  // TODO: Copy small sized ByteSeq instead to minimize multiple small arrays
+  // for IO calls
   fun ref write(data: ByteSeq): Writer^ =>
     """
     Write a ByteSeq to the buffer.

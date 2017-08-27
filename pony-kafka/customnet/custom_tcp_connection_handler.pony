@@ -9,7 +9,8 @@ use @pony_asio_event_resubscribe_read[None](event: AsioEventID)
 use @pony_asio_event_resubscribe_write[None](event: AsioEventID)
 use @pony_asio_event_destroy[None](event: AsioEventID)
 
-// TODO: Move some of the logic into primitives that take a handler ref to work on to hopefully allow for reusability between tcp/udp/etc connections
+// TODO: Move some of the logic into primitives that take a handler ref to work
+// on to hopefully allow for reusability between tcp/udp/etc connections
 class CustomTCPConnectionHandler is TCPConnectionHandler
   var _listen: (TCPListener | None) = None
   var notify: CustomTCPConnectionNotify
@@ -45,7 +46,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   let _service: String
   let _from: String
 
-  new create(conn: CustomTCPConnection, auth: TCPConnectionAuth, notify': CustomTCPConnectionNotify iso,
+  new create(conn: CustomTCPConnection, auth: TCPConnectionAuth,
+    notify': CustomTCPConnectionNotify iso,
     host: String, service: String, from: String = "", init_size: USize = 64,
     max_size: USize = 16384)
   =>
@@ -66,7 +68,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       from.cstring())
     _notify_connecting()
 
-  new ip4(conn: CustomTCPConnection, auth: TCPConnectionAuth, notify': CustomTCPConnectionNotify iso,
+  new ip4(conn: CustomTCPConnection, auth: TCPConnectionAuth,
+    notify': CustomTCPConnectionNotify iso,
     host: String, service: String, from: String = "", init_size: USize = 64,
     max_size: USize = 16384)
   =>
@@ -86,7 +89,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       from.cstring())
     _notify_connecting()
 
-  new ip6(conn: CustomTCPConnection, auth: TCPConnectionAuth, notify': CustomTCPConnectionNotify iso,
+  new ip6(conn: CustomTCPConnection, auth: TCPConnectionAuth,
+    notify': CustomTCPConnectionNotify iso,
     host: String, service: String, from: String = "", init_size: USize = 64,
     max_size: USize = 16384)
   =>
@@ -106,7 +110,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       from.cstring())
     _notify_connecting()
 
-  new accept(conn: CustomTCPConnection, listen: TCPListener, notify': CustomTCPConnectionNotify iso, fd: U32,
+  new accept(conn: CustomTCPConnection, listen: TCPListener,
+    notify': CustomTCPConnectionNotify iso, fd: U32,
     init_size: USize = 64, max_size: USize = 16384)
   =>
     """
@@ -269,18 +274,6 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       _expect = notify.expect(_conn, qty)
       _read_buf_size()
     end
-
-/*
-  fun ref expect(qty: USize = 0) =>
-    """
-    A `received` call on the notifier must contain exactly `qty` bytes. If
-    `qty` is zero, the call can contain any amount of data. This has no effect
-    if called in the `sent` notifier callback.
-    """
-    if not _in_sent then
-      _expect = notify.expect(_conn, qty)
-    end
-*/
 
   fun ref set_nodelay(state: Bool) =>
     """
@@ -794,7 +787,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
 
     notify.closed(_conn)
 
-// TODO: Uncomment when this is a full replacement for net package and includes the listener stuff
+// TODO: Uncomment when this is a full replacement for net package and includes
+// the listener stuff
 //    try (_listen as TCPListener)._conn_closed() end
 
   fun ref _apply_backpressure() =>
