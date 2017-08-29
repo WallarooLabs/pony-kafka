@@ -1,3 +1,19 @@
+/*
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+*/
+
 use "net"
 use "collections"
 use "compression"
@@ -671,10 +687,10 @@ actor KafkaClient
     = recover val Map[String, Array[KafkaConsumer tag] val] end
 
   let _leader_change_unthrottle_acks: MapIs[Map[String, Map[I32, I32]] val,
-    (Map[String, Set[I32] val] val, I32, SetIs[KafkaProducer tag])] =
+    (Map[String, Set[I32] iso] val, I32, SetIs[KafkaProducer tag])] =
     _leader_change_unthrottle_acks.create()
   let _leader_change_throttle_acks: MapIs[Map[String, Map[I32, I32]] val,
-    (Map[String, Set[I32] val] val, I32, SetIs[KafkaProducer tag])] =
+    (Map[String, Set[I32] iso] val, I32, SetIs[KafkaProducer tag])] =
     _leader_change_throttle_acks.create()
 
   new create(auth: TCPConnectionAuth, conf: KafkaConfig val,
@@ -1132,7 +1148,7 @@ actor KafkaClient
         fully_unthrottled)
     end
 
-  be _leader_change_throttle(topics_to_throttle: Map[String, Set[I32] val] val,
+  be _leader_change_throttle(topics_to_throttle: Map[String, Set[I32] iso] val,
     broker_id: I32)
   =>
     // mark all topic/partitions requested as throttled
@@ -1191,7 +1207,7 @@ actor KafkaClient
     end
 
   be _leader_change_unthrottle(
-    topics_to_unthrottle: Map[String, Set[I32] val] val,
+    topics_to_unthrottle: Map[String, Set[I32] iso] val,
     broker_id: I32)
   =>
     var fully_unthrottled: Bool = true

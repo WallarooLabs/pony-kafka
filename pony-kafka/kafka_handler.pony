@@ -1,3 +1,19 @@
+/*
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+*/
+
 use "custombuffered"
 use "custombuffered/codecs"
 use "collections"
@@ -99,8 +115,10 @@ class _KafkaTopicPartitionState
   var request_offset: I64 = 0
   var max_bytes: I32
   var paused: Bool = true
-  var old_leader: Bool = false
+  var former_leader: Bool = false
   var current_leader: Bool = false
+  var leader_change_messages: Array[ProducerKafkaMessage val] =
+    leader_change_messages.create()
 
   new create(partition_error_code': I16, partition_id': I32, leader': I32,
     replicas': Array[I32] val, isrs': Array[I32] val, request_timestamp': I64 =
@@ -124,7 +142,7 @@ class _KafkaTopicPartitionState
       + "partition_error_code = " + partition_error_code.string()
       + ", partition_id = " + partition_id.string()
       + ", leader = " + leader.string()
-      + ", old_leader = " + old_leader.string()
+      + ", former_leader = " + former_leader.string()
       + ", current_leader = " + current_leader.string()
       + ", replicas = [ " + replicas_str
       + " ], isrs = [ " + isrs_str
@@ -898,7 +916,6 @@ class _KafkaHandler is CustomTCPConnectionNotify
             end
           part_state.partition_error_code = part_meta.partition_error_code
           part_state.leader = part_meta.leader
-          part_state.leader = part_meta.leader
           part_state.replicas = part_meta.replicas
           part_state.isrs = part_meta.isrs
           part_state.request_timestamp = part_meta.request_timestamp
@@ -906,7 +923,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
           if part_meta.leader == _connection_broker_id then
             part_state.current_leader = true
           else
-            part_state.old_leader = part_state.current_leader = false
+            part_state.former_leader = part_state.current_leader = false
           end
         end
       end
@@ -991,7 +1008,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
 // * is this needed if we throttle due to network congestion?
 
   fun ref _leader_change_throttle_ack(topics_to_throttle: Map[String, Set[I32]
-    val] val, conn: CustomTCPConnection ref)
+    iso] val, conn: CustomTCPConnection ref)
   =>
     // TODO: implement throttle ack and send state over to new leader logic
     None
@@ -1004,13 +1021,15 @@ class _KafkaHandler is CustomTCPConnectionNotify
       "processing produce response and sending delivery reports.")
     // TODO: Add logic to handle errors that can be handled by client
     // automagically
-    // TODO: throttle producers for any leader changes
-    // TODO: buffer data for any topics/partitions with leader changes
+    let topics_to_throttle: Map[String, Set[I32] iso] iso =
+      recover topics_to_throttle.create() end
     for (topic, topic_response) in produce_response.pairs() do
+      let topic_state = _state.topics_state(topic)
       let topic_msgs = msgs(topic)
       for (part, part_response) in topic_response.partition_responses.pairs() do
         let kafka_error = map_kafka_error(part_response.error_code)
         let partition_msgs = topic_msgs(part)
+        let part_state = topic_state.partitions_state(part)
         try
           match kafka_error
           | ErrorNone =>
@@ -1019,15 +1038,19 @@ class _KafkaHandler is CustomTCPConnectionNotify
                 topic, part, part_response.offset + i.i64(),
                 part_response.timestamp, m.get_opaque()))
             end
-          | ErrorLeaderNotAvailable => handle_partition_leader_change(conn,
-            kafka_error, topic, part, partition_msgs)
-          | ErrorNotLeaderForPartition => handle_partition_leader_change(conn,
-            kafka_error, topic, part, partition_msgs)
-            // The following should only happen if a partition was deleted;
-            // treat as transient and retry just in case; if it is permanent,
-            // will fail after max retries
-          | ErrorUnknownTopicOrPartition => handle_partition_leader_change(conn,
-             kafka_error, topic, part, partition_msgs)
+          | ErrorLeaderNotAvailable | ErrorNotLeaderForPartition |
+              ErrorUnknownTopicOrPartition
+            =>
+            // ErrorUnknownTopicOrPartition should only happen if a partition
+            // was deleted; treat as transient and retry just in case; if it is
+            // permanent, will fail after max retries.
+            // TODO: implement max retries
+            if not topics_to_throttle.contains(topic) then
+              topics_to_throttle(topic) = recover Set[I32] end
+            end
+            topics_to_throttle(topic).set(part)
+            handle_partition_leader_change(conn,
+              kafka_error, topic, part, partition_msgs, part_state)
           else
             _conf.logger(Error) and _conf.logger.log(Error, _name +
               "Received unexpected error for topic: " + topic +
@@ -1047,17 +1070,33 @@ class _KafkaHandler is CustomTCPConnectionNotify
       end
     end
 
+    // error encountered
+    if topics_to_throttle.size() > 0 then
+      _conf.logger(Fine) and _conf.logger.log(Fine, _name +
+        "Encountered at least one leader change error. Refreshing metadata and
+        throttling producers.")
+      refresh_metadata(conn)
+      _kafka_client._leader_change_throttle(consume val topics_to_throttle,
+        _connection_broker_id)
+    end
+
   fun ref handle_partition_leader_change(conn: KafkaBrokerConnection ref,
     kafka_error: KafkaError, topic: String, partition_id: I32, msgs:
-    Array[ProducerKafkaMessage val]) ?
+    Array[ProducerKafkaMessage val],
+    partition_state: _KafkaTopicPartitionState)
   =>
+    // save messages to retry later
+    let lcm = partition_state.leader_change_messages
+    msgs.copy_to(lcm, 0, lcm.size(), msgs.size())
+
+    // mark partition as not being current leader
+    partition_state.former_leader = partition_state.current_leader = false
+
     // TODO: add logic to save messages to retry later and mark partition as
     // having no leader and decrement retry count
     _conf.logger(Fine) and _conf.logger.log(Fine, _name + "Encountered error: "
-      + kafka_error.string() +
-      "Refreshing metadata to get new leader info for topic: " + topic +
+      + kafka_error.string() + " for topic: " + topic +
       " and partition: " + partition_id.string() + "!")
-    refresh_metadata(conn)
 
   fun map_kafka_error(error_code: I16): KafkaError =>
     match (error_code)
