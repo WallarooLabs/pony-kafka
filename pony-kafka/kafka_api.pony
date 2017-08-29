@@ -1,3 +1,19 @@
+/*
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+*/
+
 use "custombuffered"
 use "custombuffered/codecs"
 use "collections"
@@ -1367,8 +1383,8 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
           let part_state = topic_state.partitions_state(part_id)
           // TODO: Reconfirm logic for when not current leader but is old_leader
           // of a non-leader partition and leader failover buffering
-          if (not part_state.current_leader) and not (part_state.old_leader and
-            (part_state.leader == -1)) then
+          if (not part_state.current_leader) and
+            not (part_state.former_leader and (part_state.leader == -1)) then
             // Not current leader and not old leader of a leaderless partition
             conf.logger(Fine) and conf.logger.log(Fine, "Skipping partition: " +
                part_id.string() + " in topic: " + topic +
