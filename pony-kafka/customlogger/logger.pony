@@ -146,7 +146,7 @@ primitive Error
 
 class val Logger[A]
   let _level: LogLevel
-  let _out: OutStream
+  //let _out: OutStream
   let _f: {(A): String} val
   let _formatter: LogFormatter
   let _verbose: Bool
@@ -158,7 +158,7 @@ class val Logger[A]
     formatter: LogFormatter = DefaultLogFormatter)
   =>
     _level = level
-    _out = out
+    //_out = out
     _f = f
     _formatter = formatter
     _verbose = verbose
@@ -170,7 +170,9 @@ class val Logger[A]
     date: String = Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S"),
     loc: SourceLoc = __loc): Bool
   =>
-    _out.print(_formatter(level, _f(consume value), _verbose, date, loc))
+    //_out.print(_formatter(level, _f(consume value), _verbose, date, loc))
+    let f = _formatter(level, _f(consume value), _verbose, date, loc)
+    @printf[I32]("%s\n".cstring(), f.cstring())
     true
 
 primitive StringLogger
