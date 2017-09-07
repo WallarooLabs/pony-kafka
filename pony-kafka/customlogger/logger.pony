@@ -172,6 +172,8 @@ class val Logger[A]
   =>
     //_out.print(_formatter(level, _f(consume value), _verbose, date, loc))
     let f = _formatter(level, _f(consume value), _verbose, date, loc)
+
+    // TODO: revert this when possible back to using outstream
     @printf[I32]("%s\n".cstring(), f.cstring())
     true
 

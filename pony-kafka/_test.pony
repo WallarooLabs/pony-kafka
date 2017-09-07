@@ -182,7 +182,6 @@ primitive _RunOffsetsApiTest
     let topic2_partition_state = _KafkaTopicPartitionState(0, partition_id, 0,
       recover Array[I32] end, recover Array[I32] end)
     topic2_partition_state.current_leader = false
-    topic2_partition_state.former_leader = false
     topic2_state.partitions_state(partition_id) = topic2_partition_state
     state.topics_state(topic2) = topic2_state
 
@@ -548,7 +547,6 @@ primitive _ProduceApiCombineSplitTest
     let topic2_partition_state = _KafkaTopicPartitionState(0, partition_id, 0,
       recover Array[I32] end, recover Array[I32] end)
     topic2_partition_state.current_leader = false
-    topic2_partition_state.former_leader = false
     topic2_state.partitions_state(partition_id) = topic2_partition_state
     state.topics_state(topic2) = topic2_state
 

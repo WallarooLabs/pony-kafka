@@ -129,6 +129,14 @@ trait KafkaBrokerConnection is CustomTCPConnection
         _KafkaHandler)._update_metadata(meta, this)
     end
 
+  be _leader_change_msgs(meta: _KafkaMetadata val, topic: String,
+    msgs: Map[I32, Array[ProducerKafkaMessage val] iso] val)
+  =>
+    try
+      ((get_handler() as CustomTCPConnectionHandler).notify as
+        _KafkaHandler)._leader_change_msgs(meta, topic, msgs, this)
+    end
+
   be write(data: ByteSeq) =>
     """
     Write a single sequence of bytes.

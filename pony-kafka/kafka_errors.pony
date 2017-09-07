@@ -52,6 +52,14 @@ primitive ErrorClientMessageTooLarge is KafkaError
   fun kafka_official(): Bool => false
   fun _retriable(): Bool => false
 
+primitive KafkaClientNoBuffering is KafkaError
+  fun apply(): I16 => -9004
+  fun string(): String => "Client(" + apply().string() +
+    "): Topic/partition is throttled and KafkaClient hasn't implemented " +
+    "buffering yet."
+  fun kafka_official(): Bool => false
+  fun _retriable(): Bool => true
+
 primitive ErrorNone is KafkaError
   fun apply(): I16 => 0
   fun string(): String => apply().string() + ": Success (no error)."

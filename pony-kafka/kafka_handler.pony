@@ -115,10 +115,14 @@ class _KafkaTopicPartitionState
   var request_offset: I64 = 0
   var max_bytes: I32
   var paused: Bool = true
-  var former_leader: Bool = false
   var current_leader: Bool = false
-  var leader_change_messages: Array[ProducerKafkaMessage val] =
-    leader_change_messages.create()
+  // Messages already sent to broker that we get a failure response for
+  var leader_change_sent_messages: Array[ProducerKafkaMessage val] =
+    leader_change_sent_messages.create()
+  // Message that haven't been sent to a broker yet
+  var leader_change_pending_messages: Array[ProducerKafkaMessage val] =
+    leader_change_pending_messages.create()
+  var leader_change: Bool = true
 
   new create(partition_error_code': I16, partition_id': I32, leader': I32,
     replicas': Array[I32] val, isrs': Array[I32] val, request_timestamp': I64 =
@@ -142,7 +146,6 @@ class _KafkaTopicPartitionState
       + "partition_error_code = " + partition_error_code.string()
       + ", partition_id = " + partition_id.string()
       + ", leader = " + leader.string()
-      + ", former_leader = " + former_leader.string()
       + ", current_leader = " + current_leader.string()
       + ", replicas = [ " + replicas_str
       + " ], isrs = [ " + isrs_str
@@ -183,6 +186,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
   var fetch_data_timer: (Timer tag | None) = None
 
   var _all_topics_partitions_paused: Bool = true
+  var _currently_throttled: Bool = false
 
   let _name: String
 
@@ -315,6 +319,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
   fun get_conf(): KafkaConfig val => _conf
 
   fun ref done_and_consume(conn: CustomTCPConnection ref) ? =>
+    _kafka_client._unthrottle_producers(_connection_broker_id)
     _kafka_client._broker_initialized(_connection_broker_id)
     _conf.logger(Info) and _conf.logger.log(Info, _name +
       "Done with initialization and metadata/offsets update")
@@ -366,8 +371,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
     partition_id: I32)
   =>
     // set to paused
-    // if everything is paused, next attempt to fetch_data will set
-    //  _all_topics_partitions_paused = true
+    // if everything is paused, next attempt to fetch_data
+    // will set _all_topics_partitions_paused = true
     try
       _state.topics_state(topic).partitions_state(partition_id).paused = true
     else
@@ -570,11 +575,13 @@ class _KafkaHandler is CustomTCPConnectionNotify
   fun ref throttled(conn: CustomTCPConnection ref) =>
     _conf.logger(Info) and _conf.logger.log(Info, _name +
       "Kafka client is throttled")
+    _currently_throttled = true
     _kafka_client._throttle_producers(_connection_broker_id)
 
   fun ref unthrottled(conn: CustomTCPConnection ref) =>
     _conf.logger(Info) and _conf.logger.log(Info, _name +
       "Kafka client is unthrottled")
+    _currently_throttled = false
     _kafka_client._unthrottle_producers(_connection_broker_id)
 
   fun dispose() =>
@@ -890,30 +897,64 @@ class _KafkaHandler is CustomTCPConnectionNotify
     ref)
   =>
     try
+      var new_partition_added: Bool = false
       for topic_meta in meta.topics_metadata.values() do
-        let topic_state = try _state.topics_state(topic_meta.topic)
+        let topic = topic_meta.topic
+        let topic_state = try _state.topics_state(topic)
           else
             _conf.logger(Error) and _conf.logger.log(Error, _name +
-              "Unable to get topic state for topic: " + topic_meta.topic +
+              "Unable to get topic state for topic: " + topic +
               "! This should never happen.")
+            // TODO: replace this error (and other similar ones) with a request
+            // to kafka client to shut down and let manager know (i.e. fail
+            // fast)
             error
           end
+
+        // TODO: add error handling for invalid topics and other possible errors
+        let kafka_topic_error = map_kafka_error(topic_meta.topic_error_code)
+        match kafka_topic_error
+        | ErrorNone => None
+        else
+          _conf.logger(Error) and _conf.logger.log(Error, _name +
+            "Encountered topic error for topic: " + topic +
+            "! Error: " + kafka_topic_error.string())
+          _kafka_client._unrecoverable_error(KafkaErrorReport(kafka_topic_error,
+            topic, -1))
+        end
 
         topic_state.topic_error_code = topic_meta.topic_error_code
         topic_state.is_internal = topic_meta.is_internal
 
         for part_meta in topic_meta.partitions_metadata.values() do
+          let partition_id = part_meta.partition_id
           let part_state =
             try
-              topic_state.partitions_state(part_meta.partition_id)
+              topic_state.partitions_state(partition_id)
             else
+              new_partition_added = true
+
               let ps = _KafkaTopicPartitionState(part_meta.partition_error_code,
-                part_meta.partition_id, part_meta.leader, part_meta.replicas,
+                partition_id, part_meta.leader, part_meta.replicas,
                 part_meta.isrs, part_meta.request_timestamp,
                 _conf.partition_fetch_max_bytes)
-              topic_state.partitions_state(part_meta.partition_id) = ps
+              topic_state.partitions_state(partition_id) = ps
               ps
             end
+          // TODO: add error handling for partition errors
+          let kafka_partition_error =
+            map_kafka_error(part_meta.partition_error_code)
+          match kafka_partition_error
+          | ErrorNone => None
+          else
+            _conf.logger(Error) and _conf.logger.log(Error, _name +
+              "Encountered topic error for topic: " + topic +
+              ", partition: " + partition_id.string() + "! Error: "
+              + kafka_partition_error.string())
+            _kafka_client._unrecoverable_error(KafkaErrorReport(
+              kafka_partition_error, topic, partition_id))
+          end
+
           part_state.partition_error_code = part_meta.partition_error_code
           part_state.leader = part_meta.leader
           part_state.replicas = part_meta.replicas
@@ -922,10 +963,114 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
           if part_meta.leader == _connection_broker_id then
             part_state.current_leader = true
+          elseif (part_meta.leader == -1) and
+            (part_state.current_leader == true) then
+            // we used to be the current leader and kafka just indicated that
+            // there is no longer a leader for this partition so we're now
+            // in a leader change
+            part_state.current_leader = false
+            part_state.leader_change = true
+
+            // take anything from _pending_buffer for this partition and put
+            // it in a separate place until leader change is done
+            // _requests_buffer will be handled as responses come back from
+            // kafka broker
+            // TODO: Tell kafka client to throttle
+            // TODO: Have broker automagically pause fetch requests for this
+            // partition
+            // TODO: implement brokers to always be paused for fetching requests
+            // for partitions they're not leader for; if they become a new
+            // leader and it's not a new partition altogether, must wait for
+            // handoff from old leader before fetching
+            handle_partition_leader_change_pending_buffer(topic, partition_id,
+              part_state)
           else
-            part_state.former_leader = part_state.current_leader = false
+            part_state.current_leader = false
+          end
+
+          // Due to kafka brokers processing requests sequentially there is no
+          // need to worry about there being outstanding produce requests for
+          // a partition that haven't been accounted for as part of
+          // `part_state.leader_change_sent_messages`.
+          if part_state.leader_change then
+            if part_state.current_leader then
+              // The leader didn't actually end up changing
+
+              // Make sure we don't think we're still changing leaders any
+              // longer
+              // TODO: Tell kafka client to unthrottle
+              part_state.leader_change = false
+
+              if (part_state.leader_change_sent_messages.size() > 0) or
+                (part_state.leader_change_pending_messages.size() > 0) then
+                // Put `part_state.leader_change_sent_messages` and
+                // `part_state.leader_change_pending_messages` back into
+                // _pending_buffer
+                let lcsm = part_state.leader_change_sent_messages =
+                  part_state.leader_change_sent_messages.create()
+                let lcpm = part_state.leader_change_pending_messages =
+                  part_state.leader_change_pending_messages.create()
+                let partition_msgs = recover iso
+                    Map[I32, Array[ProducerKafkaMessage val] iso]
+                  end
+                let lc_msgs = recover iso Array[ProducerKafkaMessage val] end
+                for m in lcsm.values() do
+                  lc_msgs.push(m)
+                end
+                for m in lcpm.values() do
+                  lc_msgs.push(m)
+                end
+                partition_msgs(partition_id) = consume lc_msgs
+                let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())
+                  as _KafkaProduceApi
+                produce_api.combine_and_split_by_message_size(_conf,
+                  _pending_buffer, topic, consume val partition_msgs
+                  , _state.topics_state)
+              end
+            else
+              // The leader did actually end up changing to a different broker
+
+              // Make sure we don't think we're still changing leaders any
+              // longer
+              part_state.leader_change = false
+
+              if (part_state.leader_change_sent_messages.size() > 0) or
+                (part_state.leader_change_pending_messages.size() > 0) then
+                // Send `part_state.leader_change_sent_messages` and
+                // `part_state.leader_change_pending_messages` to new broker
+                let lcsm = part_state.leader_change_sent_messages =
+                  part_state.leader_change_sent_messages.create()
+                let lcpm = part_state.leader_change_pending_messages =
+                  part_state.leader_change_pending_messages.create()
+                let partition_msgs = recover iso
+                    Map[I32, Array[ProducerKafkaMessage val] iso]
+                  end
+                let lc_msgs = recover iso Array[ProducerKafkaMessage val] end
+                for m in lcsm.values() do
+                  lc_msgs.push(m)
+                end
+                for m in lcpm.values() do
+                  lc_msgs.push(m)
+                end
+                partition_msgs(partition_id) = consume lc_msgs
+
+                (_, let new_leader_broker_tag) = _brokers(part_state.leader)
+
+                // send messages over to other broker
+                // TODO: Implement logic to send fetch offsets so new leader
+                // can pick up where this one leaves off for fetching
+                new_leader_broker_tag._leader_change_msgs(meta, topic,
+                  consume val partition_msgs)
+              end
+            end
           end
         end
+      end
+
+      // if not currently throttled and new partition added
+      // let kafka client know it should be unthrottled
+      if new_partition_added and (not _currently_throttled) then
+        _kafka_client._unthrottle_producers(_connection_broker_id)
       end
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
@@ -949,6 +1094,27 @@ class _KafkaHandler is CustomTCPConnectionNotify
           "transition to _KafkaPhaseDone. This should never happen.")
       end
     end
+
+  fun ref _leader_change_msgs(meta: _KafkaMetadata val, topic: String,
+    msgs: Map[I32, Array[ProducerKafkaMessage val] iso] val,
+    conn: CustomTCPConnection ref)
+  =>
+    // Make sure our metadata is up to date on latest leader info
+    _update_metadata(meta, conn)
+
+    // TODO: Tell kafka client to unthrottle
+    // add new messages to pending buffer for next send opportunity
+    try
+      let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key()) as
+        _KafkaProduceApi
+      produce_api.combine_and_split_by_message_size(_conf, _pending_buffer,
+        topic, msgs, _state.topics_state)
+    else
+      _conf.logger(Error) and _conf.logger.log(Error, _name +
+        "Unable to get produce api from _broker_apis_to_use!" +
+        " This should never happen.")
+    end
+
 
   // update state based on which offsets kafka says are available
   fun ref update_offsets(offsets: Array[_KafkaTopicOffset]) ?
@@ -1045,6 +1211,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
             // was deleted; treat as transient and retry just in case; if it is
             // permanent, will fail after max retries.
             // TODO: implement max retries
+            // TODO: Have broker automagically pause fetch requests for this
+            // partition
             if not topics_to_throttle.contains(topic) then
               topics_to_throttle(topic) = recover Set[I32] end
             end
@@ -1085,18 +1253,51 @@ class _KafkaHandler is CustomTCPConnectionNotify
     Array[ProducerKafkaMessage val],
     partition_state: _KafkaTopicPartitionState)
   =>
-    // save messages to retry later
-    let lcm = partition_state.leader_change_messages
-    msgs.copy_to(lcm, 0, lcm.size(), msgs.size())
+    // save messages to retry later; the rest of the messages in
+    // _requests_buffer will eventually accumulate here
+    let lcsm = partition_state.leader_change_sent_messages
+    msgs.copy_to(lcsm, 0, lcsm.size(), msgs.size())
+
+    handle_partition_leader_change_pending_buffer(topic, partition_id,
+        partition_state)
 
     // mark partition as not being current leader
-    partition_state.former_leader = partition_state.current_leader = false
+    partition_state.current_leader = false
+    partition_state.leader = -1 // metadata refresh will tell us the real new
+                                // leader
+    partition_state.leader_change = true
 
-    // TODO: add logic to save messages to retry later and mark partition as
-    // having no leader and decrement retry count
+    // TODO: decrement retry count
     _conf.logger(Fine) and _conf.logger.log(Fine, _name + "Encountered error: "
       + kafka_error.string() + " for topic: " + topic +
       " and partition: " + partition_id.string() + "!")
+
+  fun ref handle_partition_leader_change_pending_buffer(topic: String,
+    partition_id: I32, partition_state: _KafkaTopicPartitionState)
+  =>
+    // search through _pending_buffer to find messages for
+    // this topic/partition to save into leader_change_pending_messages
+    for (pb_size, pb_num_msgs, pb_msgs) in _pending_buffer.values() do
+      if pb_num_msgs == 0 then
+        continue
+      end
+      try
+        if pb_msgs.contains(topic) then
+          let topic_msgs = pb_msgs(topic)
+          if topic_msgs.contains(partition_id) then
+            // TODO: add logic to update entries in pending buffer to reflect
+            // new size now that messages for this partition have been removed
+            // Without the recalc of the new size we don't use bandwidth as
+            // efficiently as we would otherwise
+            (_, let partition_msgs) = topic_msgs.remove(partition_id)
+
+            // buffer messages for when new leader is elected
+            let lcpm = partition_state.leader_change_pending_messages
+            partition_msgs.copy_to(lcpm, 0, lcpm.size(), partition_msgs.size())
+          end
+        end
+      end
+    end
 
   fun map_kafka_error(error_code: I16): KafkaError =>
     match (error_code)

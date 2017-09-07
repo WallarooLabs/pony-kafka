@@ -74,6 +74,8 @@ actor Main is KafkaClientManager
       kc.consumer_resume_all()
     end
 
+  be kafka_client_error(error_report: KafkaErrorReport) =>
+    None
 
 // kafka consumer actor
 actor C is KafkaConsumer

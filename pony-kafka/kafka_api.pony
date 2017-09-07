@@ -1381,14 +1381,27 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
       for (part_id, part_msgs) in topic_msgs.pairs() do
         try
           let part_state = topic_state.partitions_state(part_id)
-          // TODO: Reconfirm logic for when not current leader but is old_leader
-          // of a non-leader partition and leader failover buffering
+          // TODO: Reconfirm logic for when not current leader but
+          // leader change (will only happen on former leader)
           if (not part_state.current_leader) and
-            not (part_state.former_leader and (part_state.leader == -1)) then
+            (not part_state.leader_change) then
             // Not current leader and not old leader of a leaderless partition
             conf.logger(Fine) and conf.logger.log(Fine, "Skipping partition: " +
                part_id.string() + " in topic: " + topic +
-               " because not current leader.")
+               " because not current leader or leader change scenario.")
+            continue
+          end
+
+          // If we're in a leader change, buffer messages for the partition
+          if part_state.leader_change then
+            // TODO: Implement buffering of messages
+            // buffer messages for when new leader is elected
+            let lcpm = part_state.leader_change_pending_messages
+            part_msgs.copy_to(lcpm, 0, lcpm.size(), part_msgs.size())
+
+            conf.logger(Fine) and conf.logger.log(Fine, "Buffering partition: "
+              + part_id.string() + " in topic: " + topic +
+               " because leader change is happening.")
             continue
           end
         else
