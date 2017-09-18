@@ -28,6 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 use ".."
+use "../../utils/bool_converter"
 
 primitive VarIntDecoder
   fun u8(rb: Reader): U8 ? =>
@@ -46,7 +47,7 @@ primitive VarIntDecoder
     """
     Read a Bool from the buffer in base 128 varint encoding.
     """
-    _decode_varint(rb, 8).bool()
+    BoolConverter.u8_to_bool(_decode_varint(rb, 8).u8())
 
   fun u16(rb: Reader): U16 ? =>
     """
@@ -123,7 +124,7 @@ primitive VarIntDecoder
     Read a Bool from the buffer in base 128 varint encoding.
     """
     (let x, let num_bytes) = _peek_varint(rb, 8, offset)
-    (x.bool(), num_bytes)
+    (BoolConverter.u8_to_bool(x.u8()), num_bytes)
 
   fun peek_u16(rb: Reader, offset: USize = 0): (U16, USize) ? =>
     """

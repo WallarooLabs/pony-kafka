@@ -164,7 +164,7 @@ class Reader
     end
 
     _available = _available - len
-    var out = recover Array[U8].undefined(len) end
+    var out = recover Array[U8].>undefined(len) end
     var i = USize(0)
 
     while i < len do

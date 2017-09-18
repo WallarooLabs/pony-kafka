@@ -49,22 +49,22 @@ class iso _TestReader is UnitTest
     let b = recover ref Reader end
 
     b.append(recover [as U8:
-      0x42,
-      0xDE, 0xAD,
-      0xAD, 0xDE,
-      0xDE, 0xAD, 0xBE, 0xEF,
-      0xEF, 0xBE, 0xAD, 0xDE,
-      0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED, 0xFA, 0xCE,
-      0xCE, 0xFA, 0xED, 0xFE, 0xEF, 0xBE, 0xAD, 0xDE,
-      0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED, 0xFA, 0xCE,
-      0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED, 0xFA, 0xCE,
-      0xCE, 0xFA, 0xED, 0xFE, 0xEF, 0xBE, 0xAD, 0xDE,
-      0xCE, 0xFA, 0xED, 0xFE, 0xEF, 0xBE, 0xAD, 0xDE
+      0x42
+      0xDE; 0xAD
+      0xAD; 0xDE
+      0xDE; 0xAD; 0xBE; 0xEF
+      0xEF; 0xBE; 0xAD; 0xDE
+      0xDE; 0xAD; 0xBE; 0xEF; 0xFE; 0xED; 0xFA; 0xCE
+      0xCE; 0xFA; 0xED; 0xFE; 0xEF; 0xBE; 0xAD; 0xDE
+      0xDE; 0xAD; 0xBE; 0xEF; 0xFE; 0xED; 0xFA; 0xCE
+      0xDE; 0xAD; 0xBE; 0xEF; 0xFE; 0xED; 0xFA; 0xCE
+      0xCE; 0xFA; 0xED; 0xFE; 0xEF; 0xBE; 0xAD; 0xDE
+      0xCE; 0xFA; 0xED; 0xFE; 0xEF; 0xBE; 0xAD; 0xDE
       ] end)
 
-    b.append(recover [as U8: 'h', 'i'] end)
-    b.append(recover [as U8: '\n', 't', 'h', 'e'] end)
-    b.append(recover [as U8: 'r', 'e', '\r', '\n'] end)
+    b.append(recover [as U8: 'h'; 'i'] end)
+    b.append(recover [as U8: '\n'; 't'; 'h'; 'e'] end)
+    b.append(recover [as U8: 'r'; 'e'; '\r'; '\n'] end)
 
     // These expectations peek into the buffer without consuming bytes.
     h.assert_eq[U8](LittleEndianDecoder.peek_u8(b), 0x42)
@@ -98,32 +98,32 @@ class iso _TestReader is UnitTest
     h.assert_eq[String](b.line(), "hi")
     h.assert_eq[String](b.line(), "there")
 
-    b.append(recover [as U8: 'h', 'i'] end)
+    b.append(recover [as U8: 'h'; 'i'] end)
 
     try
       b.line()
       h.fail("shouldn't have a line")
     end
 
-    b.append(recover [as U8: '!', '\n'] end)
+    b.append(recover [as U8: '!'; '\n'] end)
     h.assert_eq[String](b.line(), "hi!")
 
-    b.append(recover [as U8: 's', 't', 'r', '1'] end)
+    b.append(recover [as U8: 's'; 't'; 'r'; '1'] end)
     try
       b.read_until(0)
       h.fail("should fail reading until 0")
     end
     b.append(recover [as U8: 0] end)
-    b.append(recover [as U8: 'f', 'i', 'e', 'l', 'd', '1', ';',
-      'f', 'i', 'e', 'l', 'd', '2', ';', ';'] end)
+    b.append(recover [as U8: 'f'; 'i'; 'e'; 'l'; 'd'; '1'; ';'
+      'f'; 'i'; 'e'; 'l'; 'd'; '2'; ';'; ';'] end)
     h.assert_eq[String](String.from_array(b.read_until(0)), "str1")
     h.assert_eq[String](String.from_array(b.read_until(';')), "field1")
     h.assert_eq[String](String.from_array(b.read_until(';')), "field2")
     // read an empty field
     h.assert_eq[String](String.from_array(b.read_until(';')), "")
 
-    b.append(recover [ as U8: 0 ] end)
-    b.append(recover [ as U8: 172, 2 ] end)
+    b.append(recover [as U8: 0] end)
+    b.append(recover [as U8: 172; 2] end)
 
 
     h.assert_eq[U8](VarIntDecoder.u8(b), 0)
@@ -153,9 +153,10 @@ class iso _TestWriter is UnitTest
     BigEndianEncoder.u128(wb, 0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
     LittleEndianEncoder.u128(wb, 0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
 
-    wb.write(recover [as U8: 'h', 'i'] end)
-    wb.writev(recover [as Array[U8]: [as U8: '\n', 't', 'h', 'e'],
-                                     [as U8: 'r', 'e', '\r', '\n']] end)
+    wb.write(recover [as U8: 'h'; 'i'] end)
+    wb.writev(recover [as Array[U8]: [as U8: '\n'; 't'; 'h'; 'e']
+                                     [as U8: 'r'; 'e'; '\r'; '\n']
+                      ] end)
 
     VarIntEncoder.u8(wb, 0)
     VarIntEncoder.u8(wb, 0x42)
@@ -263,12 +264,12 @@ class iso _TestWriter is UnitTest
     h.assert_eq[U64](VarIntDecoder.u64(b), 299)
     h.assert_eq[U64](VarIntDecoder.u64(b), 4294967295)
 
-    b.append(recover [as U8: 'h', 'i'] end)
+    b.append(recover [as U8: 'h'; 'i'] end)
 
     try
       b.line()
       h.fail("shouldn't have a line")
     end
 
-    b.append(recover [as U8: '!', '\n'] end)
+    b.append(recover [as U8: '!'; '\n'] end)
     h.assert_eq[String](b.line(), "hi!")
