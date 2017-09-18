@@ -28,6 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 use ".."
+use "../../utils/bool_converter"
 
 primitive VarIntEncoder
   fun u8(wb: Writer, data: U8) =>
@@ -46,7 +47,7 @@ primitive VarIntEncoder
     """
     Write a Bool to the buffer in base 128 varint encoding.
     """
-    _encode_varint(wb, data.u64())
+    _encode_varint(wb, BoolConverter.bool_to_u8(data).u64())
 
   fun u16(wb: Writer, data: U16) =>
     """
