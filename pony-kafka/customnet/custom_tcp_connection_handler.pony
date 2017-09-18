@@ -90,7 +90,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     _host = host
     _service = service
     _from = from
-    _read_buf = recover Array[U8].undefined(init_size) end
+    _read_buf = recover Array[U8].>undefined(init_size) end
     _next_size = init_size
     _max_size = max_size
     notify = consume notify'
@@ -111,7 +111,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     _host = host
     _service = service
     _from = from
-    _read_buf = recover Array[U8].undefined(init_size) end
+    _read_buf = recover Array[U8].>undefined(init_size) end
     _next_size = init_size
     _max_size = max_size
     notify = consume notify'
@@ -132,7 +132,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     _host = host
     _service = service
     _from = from
-    _read_buf = recover Array[U8].undefined(init_size) end
+    _read_buf = recover Array[U8].>undefined(init_size) end
     _next_size = init_size
     _max_size = max_size
     notify = consume notify'
@@ -170,7 +170,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       AsioEventHelper.set_writeable(_event, true)
     end
     _writeable = true
-    _read_buf = recover Array[U8].undefined(init_size) end
+    _read_buf = recover Array[U8].>undefined(init_size) end
     _next_size = init_size
     _max_size = max_size
 
@@ -193,7 +193,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     Do nothing on windows.
     """
     ifdef not windows then
-      _pending_writev.push(data.cpointer().usize()).push(data.size())
+      _pending_writev.>push(data.cpointer().usize()).>push(data.size())
       _pending_writev_total = _pending_writev_total + data.size()
       _pending.push((data, 0))
     end
@@ -212,7 +212,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
         end
       else
         for bytes in notify.sentv(_conn, data).values() do
-          _pending_writev.push(bytes.cpointer().usize()).push(bytes.size())
+          _pending_writev.>push(bytes.cpointer().usize()).>push(bytes.size())
           _pending_writev_total = _pending_writev_total + bytes.size()
           _pending.push((bytes, 0))
         end
@@ -231,7 +231,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
 
     ifdef not windows then
       for bytes in notify.sentv(_conn, data).values() do
-        _pending_writev.push(bytes.cpointer().usize()).push(bytes.size())
+        _pending_writev.>push(bytes.cpointer().usize()).>push(bytes.size())
         _pending_writev_total = _pending_writev_total + bytes.size()
         _pending.push((bytes, 0))
       end
@@ -462,7 +462,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
           end
         end
       else
-        _pending_writev.push(data.cpointer().usize()).push(data.size())
+        _pending_writev.>push(data.cpointer().usize()).>push(data.size())
         _pending_writev_total = _pending_writev_total + data.size()
         _pending.push((data, 0))
         _pending_writes()
