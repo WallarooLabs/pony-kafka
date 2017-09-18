@@ -1326,7 +1326,7 @@ actor KafkaClient
     _conf.logger(Error) and _conf.logger.log(Error, "Kafka Client encountered" +
       " unrecoverable error! " + error_report.string())
 
-    _conf.logger(Error) and _conf.logger.log(Error, "SHUTTING DOWN CLIENT!!!")
+    _conf.logger(Error) and _conf.logger.log(Error, "SHUTTING DOWN CLIENT!")
 
     // let manager know of the unrecoverable
     _manager.kafka_client_error(error_report)
