@@ -228,7 +228,7 @@ class KafkaRoundRobinConsumerMessageHandler is KafkaConsumerMessageHandler
   fun ref apply(consumers: Array[KafkaConsumer tag] val, msg: KafkaMessage val):
      (KafkaConsumer tag | None)
   =>
-    try consumers(_x = (_x + 1) % consumers.size()) end
+    try consumers(_x = (_x + 1) % consumers.size())? end
 
   fun clone(): KafkaConsumerMessageHandler iso^ =>
     recover iso KafkaRoundRobinConsumerMessageHandler end
@@ -244,7 +244,7 @@ class KafkaRandomConsumerMessageHandler is KafkaConsumerMessageHandler
   fun ref apply(consumers: Array[KafkaConsumer tag] val, msg: KafkaMessage val):
      (KafkaConsumer tag | None)
   =>
-    try consumers(_mt.next().usize() % consumers.size()) end
+    try consumers(_mt.next().usize() % consumers.size())? end
 
   fun clone(): KafkaConsumerMessageHandler iso^ => recover iso
     KafkaRandomConsumerMessageHandler(_seed) end
@@ -255,7 +255,7 @@ class KafkaPartitionConsumerMessageHandler is KafkaConsumerMessageHandler
   fun ref apply(consumers: Array[KafkaConsumer tag] val, msg: KafkaMessage val):
      (KafkaConsumer tag | None)
   =>
-    try consumers(msg.get_partition_id().usize() % consumers.size()) end
+    try consumers(msg.get_partition_id().usize() % consumers.size())? end
 
   fun clone(): KafkaConsumerMessageHandler iso^ =>
     recover iso KafkaPartitionConsumerMessageHandler end
@@ -270,9 +270,9 @@ class KafkaHashConsumerMessageHandler is KafkaConsumerMessageHandler
     try
       match key
       | let k: Array[U8] val => consumers(@ponyint_hash_block[U64](k.cpointer(),
-         k.size()).usize() % consumers.size())
+         k.size()).usize() % consumers.size())?
       else
-        consumers(0) // always return first consumer
+        consumers(0)? // always return first consumer
       end
     end
 
@@ -517,9 +517,9 @@ class KafkaProducerMapping
       let error_msgs' = Array[(KafkaError, I32, Any tag)]
 
       try
-        let tc = conf.topics(topic)
-        let tm = topic_mapping(topic)
-        let message_partitioner = topic_partitioners(topic)
+        let tc = conf.topics(topic)?
+        let tm = topic_mapping(topic)?
+        let message_partitioner = topic_partitioners(topic)?
 
         for (opaque, value, key) in msgs.values() do
           let key_size = match key
@@ -551,7 +551,7 @@ class KafkaProducerMapping
             continue
           end
 
-          let broker_id = tm(part_id)
+          let broker_id = tm(part_id)?
 
           if broker_id == -999 then
             // TODO: implement buffering logic for throttled brokers
@@ -570,7 +570,7 @@ class KafkaProducerMapping
           end
 
           try
-            msgs_to_send(part_id).push(m)
+            msgs_to_send(part_id)?.push(m)
           else
             conf.logger(Error) and conf.logger.log(Error,
               "Error adding message to array in map. This should never happen.")
@@ -621,9 +621,9 @@ class KafkaProducerMapping
   =>
     if conf.producer_topics.contains(topic) then
       try
-        let tc = conf.topics(topic)
-        let tm = topic_mapping(topic)
-        let message_partitioner = topic_partitioners(topic)
+        let tc = conf.topics(topic)?
+        let tm = topic_mapping(topic)?
+        let message_partitioner = topic_partitioners(topic)?
 
         let key_size = match key
           | let b: ByteSeq => b.size()
@@ -656,7 +656,7 @@ class KafkaProducerMapping
           return (KafkaClientInvalidPartition, part_id, opaque)
         end
 
-        let broker_id = tm(part_id)
+        let broker_id = tm(part_id)?
 
         if broker_id == -999 then
           // TODO: implement buffering logic for throttled brokers
@@ -673,7 +673,7 @@ class KafkaProducerMapping
 
         (_, let broker_tag) =
           try
-            brokers(broker_id)
+            brokers(broker_id)?
           else
             conf.logger(Error) and conf.logger.log(Error,
               "Error looking up brokers(broker_id): " + broker_id.string())
@@ -810,7 +810,7 @@ actor KafkaClient
     consumers: Array[KafkaConsumer tag] val)
   =>
     try
-      let tc = _topic_consumers(topic)
+      let tc = _topic_consumers(topic)?
       for c in consumers.values() do
         if not tc.contains(c) then
           tc.push(c)
@@ -831,7 +831,7 @@ actor KafkaClient
     =>
     if _topic_consumers.contains(topic) then
       try
-        _topic_consumers(topic).clear()
+        _topic_consumers(topic)?.clear()
       else
         _conf.logger(Error) and _conf.logger.log(Error, "Error clearing " +
           "consumers in topic_consumers. This should never happen.")
@@ -849,9 +849,9 @@ actor KafkaClient
 
     try
       (let current_part_leader, let throttled, let consume_paused) =
-        _topic_leader_state(topic)(partition_id)
+        _topic_leader_state(topic)?(partition_id)?
       if consume_paused == false then
-        _topic_leader_state(topic)(partition_id) = (current_part_leader,
+        _topic_leader_state(topic)?(partition_id) = (current_part_leader,
           throttled, true)
         something_paused = true
         _conf.logger(Fine) and _conf.logger.log(Fine,
@@ -898,9 +898,9 @@ actor KafkaClient
 
     try
       (let current_part_leader, let throttled, let consume_paused) =
-        _topic_leader_state(topic)(partition_id)
+        _topic_leader_state(topic)?(partition_id)?
       if consume_paused == true then
-        _topic_leader_state(topic)(partition_id) = (current_part_leader,
+        _topic_leader_state(topic)?(partition_id) = (current_part_leader,
           throttled, false)
         something_resumed = true
         _conf.logger(Fine) and _conf.logger.log(Fine,
@@ -963,7 +963,7 @@ actor KafkaClient
       if _brokers.contains(b.node_id) then
         if _uninitialized_brokers.contains(b.node_id) then
           try
-            (_, let bc) = _brokers(b.node_id)
+            (_, let bc) = _brokers(b.node_id)?
             bc._update_metadata(meta)
           else
             _conf.logger(Error) and _conf.logger.log(Error, "Error looking " +
@@ -1002,7 +1002,7 @@ actor KafkaClient
         iso = recover iso brokers_list.create() end
       for (k, v) in _brokers.pairs() do
         try
-          brokers_list.insert(k, v)
+          brokers_list.insert(k, v)?
         end
       end
 
@@ -1018,7 +1018,7 @@ actor KafkaClient
 
     // update topic partition/leader mapping if something changed
     for tmeta in meta.topics_metadata.values() do
-      let topic_leader_state = try _topic_leader_state(tmeta.topic)
+      let topic_leader_state = try _topic_leader_state(tmeta.topic)?
         else
           let tm = Map[I32, (I32, Bool, Bool)]
           _topic_leader_state(tmeta.topic) = tm
@@ -1080,7 +1080,7 @@ actor KafkaClient
                   else
                     KafkaProduceAndConsume // this should never be reached
                   end
-            map_topic_partitions.insert(topic, (ktt, consume map_topic_parts))
+            map_topic_partitions.insert(topic, (ktt, consume map_topic_parts))?
           end
         end
 
@@ -1106,9 +1106,9 @@ actor KafkaClient
         for (partition_id, (leader_id, throttled, consume_paused)) in
           topic_leader_state.pairs() do
           map_topic_part_mapping.insert(partition_id, if throttled then -999
-            else leader_id end)
+            else leader_id end)?
         end
-        map_topic_mapping.insert(topic, consume map_topic_part_mapping)
+        map_topic_mapping.insert(topic, consume map_topic_part_mapping)?
       end
     end
 
@@ -1201,10 +1201,10 @@ actor KafkaClient
     // mark topic/partitions requested as throttled
     for (topic, partitions) in topics_to_throttle.pairs() do
       try
-        let topic_leader_state_current = _topic_leader_state(topic)
+        let topic_leader_state_current = _topic_leader_state(topic)?
         for partition_id in partitions.values() do
           (let leader_id, let throttled, let consume_paused) =
-            topic_leader_state_current(partition_id)
+            topic_leader_state_current(partition_id)?
           topic_leader_state_current(partition_id) = (leader_id, true,
             consume_paused)
         end
@@ -1241,15 +1241,15 @@ actor KafkaClient
 
     try
       (let topics_to_throttle, let broker_id, let acks_received) =
-        _leader_change_throttle_acks(topic_mapping)
+        _leader_change_throttle_acks(topic_mapping)?
       acks_received.set(sent_p)
 
       // if we've received all acks
       if acks_received.size() == _producers.size() then
-        _leader_change_throttle_acks.remove(topic_mapping)
+        _leader_change_throttle_acks.remove(topic_mapping)?
 
         // Notify broker of all acks received for throttle
-        (_, let bc) = _brokers(broker_id)
+        (_, let bc) = _brokers(broker_id)?
         bc._leader_change_throttle_ack(topics_to_throttle)
       end
     else
@@ -1270,7 +1270,7 @@ actor KafkaClient
         map_leader_state.pairs() do
         try
           if topics_to_unthrottle.contains(topic) and
-            topics_to_unthrottle(topic).contains(partition_id) then
+            topics_to_unthrottle(topic)?.contains(partition_id) then
             map_leader_state(partition_id) = (leader_id, false, consume_paused)
           elseif throttled == true then
             fully_unthrottled = false
@@ -1307,12 +1307,12 @@ actor KafkaClient
 
     try
       (let topics_to_unthrottle, let broker_id, let acks_received) =
-        _leader_change_unthrottle_acks(topic_mapping)
+        _leader_change_unthrottle_acks(topic_mapping)?
       acks_received.set(sent_p)
 
       // if we've received all acks
       if acks_received.size() == _producers.size() then
-        _leader_change_unthrottle_acks.remove(topic_mapping)
+        _leader_change_unthrottle_acks.remove(topic_mapping)?
         // TODO: Notify broker of all acks received for unthrottle
       end
     else

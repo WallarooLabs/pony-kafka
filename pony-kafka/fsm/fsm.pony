@@ -55,18 +55,18 @@ class Fsm[A]
 
     for (old_state, new_state, func) in valid_transitions.values() do
       if old_state is FsmStateAny then
-        _add_state_transitions_old_any(new_state, func)
+        _add_state_transitions_old_any(new_state, func)?
       elseif old_state is FsmStateNotOld then
-        _add_state_transitions_old_not_self(new_state, func)
+        _add_state_transitions_old_not_self(new_state, func)?
       elseif new_state is FsmStateAny then
-        _add_state_transitions_new_any(old_state, func)
+        _add_state_transitions_new_any(old_state, func)?
       elseif new_state is FsmStateNotOld then
-        _add_state_transitions_new_not_self(old_state, func)
+        _add_state_transitions_new_not_self(old_state, func)?
       else
         _logger(Fine) and _logger.log(Fine,
           "Adding valid state transition from: " + old_state.string() + " to " +
           new_state.string())
-        state_transitions.insert((old_state, new_state), func)
+        state_transitions.insert((old_state, new_state), func)?
       end
     end
 
@@ -76,7 +76,7 @@ class Fsm[A]
     for s in states.values() do
       _logger(Fine) and _logger.log(Fine, "Adding valid state transition from: "
          + s.string() + " to " + new_state.string())
-      state_transitions.insert((s, new_state), func)
+      state_transitions.insert((s, new_state), func)?
     end
 
   fun ref _add_state_transitions_old_not_self(new_state: FsmState val,
@@ -89,7 +89,7 @@ class Fsm[A]
       _logger(Fine) and _logger.log(Fine,
         "Adding valid state transition from: " + s.string() + " to " +
         new_state.string())
-      state_transitions.insert((s, new_state), func)
+      state_transitions.insert((s, new_state), func)?
     end
 
   fun ref _add_state_transitions_new_any(old_state: FsmState val,
@@ -98,7 +98,7 @@ class Fsm[A]
     for s in states.values() do
       _logger(Fine) and _logger.log(Fine, "Adding valid state transition from: "
          + old_state.string() + " to " + s.string())
-      state_transitions.insert((old_state, s), func)
+      state_transitions.insert((old_state, s), func)?
     end
 
   fun ref _add_state_transitions_new_not_self(old_state: FsmState val,
@@ -110,7 +110,7 @@ class Fsm[A]
       end
       _logger(Fine) and _logger.log(Fine, "Adding valid state transition from: "
          + old_state.string() + " to " + s.string())
-      state_transitions.insert((old_state, s), func)
+      state_transitions.insert((old_state, s), func)?
     end
 
   fun ref add_allowed_state(state: FsmState val) ? =>
@@ -150,7 +150,7 @@ class Fsm[A]
     _logger(Fine) and _logger.log(Fine, "State transition from: " +
       _current_state.string() + " to " + new_state.string())
     let func = try
-        state_transitions((_current_state, new_state))
+        state_transitions((_current_state, new_state))?
       else
         _logger(Fine) and _logger.log(Fine,
           "State transition lookup failed. from: " + _current_state.string() +
@@ -161,7 +161,7 @@ class Fsm[A]
     | let f: {ref(FsmState val, Fsm[A], A) ?} ref =>
       let old_state = _current_state = new_state
       try
-        f(old_state, this, consume data)
+        f(old_state, this, consume data)?
       else
         _logger(Error) and _logger.log(Error,
           "Error running function on state transition")

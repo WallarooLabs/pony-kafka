@@ -222,87 +222,87 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
     // simple intialization phase state machine
     try
-      _statemachine.add_allowed_state(_KafkaPhaseStart)
-      _statemachine.add_allowed_state(_KafkaPhaseSkipUpdateApiVersions)
-      _statemachine.add_allowed_state(_KafkaPhaseUpdateApiVersions)
-      _statemachine.add_allowed_state(_KafkaPhaseUpdateMetadata)
-      _statemachine.add_allowed_state(_KafkaPhaseUpdateOffsets)
-      _statemachine.add_allowed_state(_KafkaPhaseDone)
-      _statemachine.add_allowed_state(_KafkaPhaseUpdateApiVersionsReconnect)
-      _statemachine.add_allowed_state(_KafkaPhaseSkipUpdateApiVersionsReconnect)
-      _statemachine.add_allowed_state(_KafkaPhaseUpdateMetadataReconnect)
+      _statemachine.add_allowed_state(_KafkaPhaseStart)?
+      _statemachine.add_allowed_state(_KafkaPhaseSkipUpdateApiVersions)?
+      _statemachine.add_allowed_state(_KafkaPhaseUpdateApiVersions)?
+      _statemachine.add_allowed_state(_KafkaPhaseUpdateMetadata)?
+      _statemachine.add_allowed_state(_KafkaPhaseUpdateOffsets)?
+      _statemachine.add_allowed_state(_KafkaPhaseDone)?
+      _statemachine.add_allowed_state(_KafkaPhaseUpdateApiVersionsReconnect)?
+      _statemachine.add_allowed_state(_KafkaPhaseSkipUpdateApiVersionsReconnect)?
+      _statemachine.add_allowed_state(_KafkaPhaseUpdateMetadataReconnect)?
 
       _statemachine.valid_transition(FsmStateAny, _KafkaPhaseStart,
         {ref(old_state: FsmState val, state_machine: Fsm[CustomTCPConnection
-        ref], conn: CustomTCPConnection ref)(kh = this) => None} ref)
+        ref], conn: CustomTCPConnection ref)(kh = this) => None} ref)?
 
       _statemachine.valid_transition(FsmStateAny, _KafkaPhaseUpdateApiVersions,
         {ref(old_state: FsmState val, state_machine: Fsm[CustomTCPConnection
         ref], conn: CustomTCPConnection ref)(kh = this) =>
-        conn.get_handler().writev(kh.update_broker_api_versions())} ref)
+        conn.get_handler().writev(kh.update_broker_api_versions())} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateApiVersions,
         _KafkaPhaseUpdateMetadata, {ref(old_state: FsmState val, state_machine:
         Fsm[CustomTCPConnection ref], conn: CustomTCPConnection ref)(kh = this)
-        ? => kh.refresh_metadata(conn)} ref)
+        ? => kh.refresh_metadata(conn)?} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateApiVersions,
         _KafkaPhaseSkipUpdateApiVersions, {ref(old_state: FsmState val,
         state_machine: Fsm[CustomTCPConnection ref], conn: CustomTCPConnection
-        ref)(kh = this) ? => kh.set_fallback_api_versions(conn)} ref)
+        ref)(kh = this) ? => kh.set_fallback_api_versions(conn)?} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseSkipUpdateApiVersions,
         _KafkaPhaseUpdateMetadata, {ref(old_state: FsmState val, state_machine:
         Fsm[CustomTCPConnection ref], conn: CustomTCPConnection ref)(kh = this)
-        ? => kh.refresh_metadata(conn)} ref)
+        ? => kh.refresh_metadata(conn)?} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseStart,
         _KafkaPhaseUpdateMetadata, {ref(old_state: FsmState val, state_machine:
         Fsm[CustomTCPConnection ref], conn: CustomTCPConnection ref)(kh = this)
-        ? => kh.refresh_metadata(conn)} ref)
+        ? => kh.refresh_metadata(conn)?} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateMetadata,
         _KafkaPhaseUpdateOffsets, {ref(old_state: FsmState val, state_machine:
         Fsm[CustomTCPConnection ref], conn: CustomTCPConnection ref)(kh = this)
-        ? => conn.get_handler().writev(kh.request_offsets())} ref)
+        ? => conn.get_handler().writev(kh.request_offsets()?)} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateOffsets, _KafkaPhaseDone,
         {ref(old_state: FsmState val, state_machine: Fsm[CustomTCPConnection
         ref], conn: CustomTCPConnection ref)(kh = this) ? =>
-        kh.done_and_consume(conn)} ref)
+        kh.done_and_consume(conn)?} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseDone,
         _KafkaPhaseUpdateApiVersionsReconnect, {ref(old_state: FsmState val,
         state_machine: Fsm[CustomTCPConnection ref], conn: CustomTCPConnection
         ref)(kh = this) =>
-        conn.get_handler().writev(kh.update_broker_api_versions())} ref)
+        conn.get_handler().writev(kh.update_broker_api_versions())} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateApiVersionsReconnect,
         _KafkaPhaseUpdateMetadataReconnect, {ref(old_state: FsmState val,
         state_machine: Fsm[CustomTCPConnection ref], conn: CustomTCPConnection
-        ref)(kh = this) ? => kh.refresh_metadata(conn)} ref)
+        ref)(kh = this) ? => kh.refresh_metadata(conn)?} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateApiVersionsReconnect,
         _KafkaPhaseSkipUpdateApiVersionsReconnect, {ref(old_state: FsmState val,
          state_machine: Fsm[CustomTCPConnection ref], conn: CustomTCPConnection
-        ref)(kh = this) ? => kh.set_fallback_api_versions(conn)} ref)
+        ref)(kh = this) ? => kh.set_fallback_api_versions(conn)?} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseSkipUpdateApiVersionsReconnect,
         _KafkaPhaseUpdateMetadataReconnect, {ref(old_state: FsmState val,
         state_machine: Fsm[CustomTCPConnection ref], conn: CustomTCPConnection
-        ref)(kh = this) ? => kh.refresh_metadata(conn)} ref)
+        ref)(kh = this) ? => kh.refresh_metadata(conn)?} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateMetadataReconnect,
         _KafkaPhaseDone, {ref(old_state: FsmState val, state_machine:
         Fsm[CustomTCPConnection ref], conn: CustomTCPConnection ref)(kh = this)
-        ? => kh.done_and_consume_reconnect(conn)} ref)
+        ? => kh.done_and_consume_reconnect(conn)?} ref)?
 
       _statemachine.initialize(_KafkaPhaseStart, {(old_state: FsmState val,
         new_state: FsmState val, state_machine: Fsm[CustomTCPConnection ref],
         data: CustomTCPConnection ref)(kh = this, logger = _conf.logger, name =
         _name) => logger(Error) and logger.log(Error, name +
         "Error transitioning states from " + old_state.string() + " to " +
-        new_state.string())} ref)
+        new_state.string())} ref)?
 
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
@@ -313,7 +313,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     tag] val] val) =>
     for (topic, consumers) in topic_consumers.pairs() do
       try
-        _state.topics_state(topic).consumers = consumers
+        _state.topics_state(topic)?.consumers = consumers
       else
         _conf.logger(Error) and _conf.logger.log(Error, _name +
           "Error updating consumers for topic: " + topic +
@@ -340,7 +340,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     end
 
     if not _all_topics_partitions_paused then
-      consume_messages(conn)
+      consume_messages(conn)?
     end
 
   fun ref done_and_consume_reconnect(conn: CustomTCPConnection ref) ? =>
@@ -358,14 +358,14 @@ class _KafkaHandler is CustomTCPConnectionNotify
     end
 
     if not _all_topics_partitions_paused then
-      consume_messages(conn)
+      consume_messages(conn)?
     end
 
   fun ref _update_consumer_message_handler(topic: String, consumer_handler:
     KafkaConsumerMessageHandler val)
   =>
     try
-      _state.topics_state(topic).message_handler = consumer_handler.clone()
+      _state.topics_state(topic)?.message_handler = consumer_handler.clone()
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Error updating message handler for topic: " + topic +
@@ -379,7 +379,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     // if everything is paused, next attempt to fetch_data
     // will set _all_topics_partitions_paused = true
     try
-      _state.topics_state(topic).partitions_state(partition_id).paused = true
+      _state.topics_state(topic)?.partitions_state(partition_id)?.paused = true
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Error pausing consumer for topic: " + topic + " and partition: " +
@@ -398,7 +398,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     partition_id: I32) =>
     // set to unpaused
     try
-      _state.topics_state(topic).partitions_state(partition_id).paused = false
+      _state.topics_state(topic)?.partitions_state(partition_id)?.paused = false
 
       let was_totally_paused = _all_topics_partitions_paused = false
 
@@ -406,7 +406,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       if (_statemachine.current_state() is _KafkaPhaseDone) and
         (was_totally_paused == true) then
         try
-          consume_messages(conn)
+          consume_messages(conn)?
         else
           _conf.logger(Error) and _conf.logger.log(Error, _name +
             "error consuming messages in consumer resume.")
@@ -432,7 +432,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     if (_statemachine.current_state() is _KafkaPhaseDone) and
       (was_totally_paused == true) then
       try
-        consume_messages(conn)
+        consume_messages(conn)?
       else
         _conf.logger(Error) and _conf.logger.log(Error, _name +
           "error consuming messages in consumer resume all.")
@@ -450,7 +450,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       // TODO: Does it matter if we get an ack for something that we're not
       //  tracking any longer or at all?
       try
-        _state.consumer_unacked_offsets(msg._get_topic_partition()).unset(msg.
+        _state.consumer_unacked_offsets(msg._get_topic_partition())?.unset(msg.
           get_offset())
       else
         _conf.logger(Error) and _conf.logger.log(Error, _name +
@@ -467,7 +467,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       "Kafka client received " + data.size().string() + " bytes")
     if _header then
       try
-        let payload_size: USize = payload_length(consume data)
+        let payload_size: USize = payload_length(consume data)?
 
         conn.get_handler().expect(payload_size)
         _header = false
@@ -476,7 +476,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     else
       try
         decode_response((conn as KafkaBrokerConnection), consume data,
-          network_received_timestamp)
+          network_received_timestamp)?
       else
         _conf.logger(Error) and _conf.logger.log(Error, _name +
           "Error decoding kafka message")
@@ -505,7 +505,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     _conf.logger(Fine) and _conf.logger.log(Fine, _name +
       "Kafka client successfully connected")
     try
-      initialize_connection(conn)
+      initialize_connection(conn)?
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Error initializing kafka connection")
@@ -535,7 +535,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     try
       while _requests_buffer.size() > 0 do
         (let sent_correlation_id, let request_type, let extra_request_data) =
-          _requests_buffer.pop()
+          _requests_buffer.pop()?
 
         match request_type
         // if it was a produce request, put it back on the pending buffer
@@ -604,7 +604,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     let rb = recover ref Reader end
     rb.append(consume data)
     try
-      BigEndianDecoder.i32(rb).usize()
+      BigEndianDecoder.i32(rb)?.usize()
     else
       error
     end
@@ -615,31 +615,31 @@ class _KafkaHandler is CustomTCPConnectionNotify
       // if we're reconnecting when we had requested ApiVersions, we need to
       // fall back to a fixed set of functionality because broker doesn't
       // support ApiVersions call
-      _statemachine.transition_to(_KafkaPhaseSkipUpdateApiVersions, conn)
+      _statemachine.transition_to(_KafkaPhaseSkipUpdateApiVersions, conn)?
     | (_KafkaPhaseUpdateApiVersionsReconnect, _) =>
       // if we're reconnecting when we had requested ApiVersions, we need to
       // fall back to a fixed set of functionality because broker doesn't
       // support ApiVersions call
       _statemachine.transition_to(_KafkaPhaseSkipUpdateApiVersionsReconnect,
-        conn)
+        conn)?
     | (_KafkaPhaseStart, true) =>
-      _statemachine.transition_to(_KafkaPhaseUpdateApiVersions, conn)
+      _statemachine.transition_to(_KafkaPhaseUpdateApiVersions, conn)?
     | (_KafkaPhaseStart, false) =>
       // if ApiVersions is not supported, we need to fall back to a fixed set of
       // functionality
-      _statemachine.transition_to(_KafkaPhaseSkipUpdateApiVersions, conn)
+      _statemachine.transition_to(_KafkaPhaseSkipUpdateApiVersions, conn)?
     | (_KafkaPhaseDone, _) =>
       // if we're already fully initialized
       // retry the ApiVersions call in case broker was upgraded
       _api_versions_supported = true
-      _statemachine.transition_to(_KafkaPhaseUpdateApiVersionsReconnect, conn)
+      _statemachine.transition_to(_KafkaPhaseUpdateApiVersionsReconnect, conn)?
     else
       // we're not fully initialized but we're past ApiVersions
       if not (_statemachine.current_state() is _KafkaPhaseUpdateApiVersions)
         and _api_versions_supported then
-        _statemachine.transition_to(_KafkaPhaseUpdateApiVersions, conn)
+        _statemachine.transition_to(_KafkaPhaseUpdateApiVersions, conn)?
       else
-        _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)
+        _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)?
       end
     end
     conn.get_handler().expect(_header_length)
@@ -662,9 +662,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
     // Update metadata
     match _statemachine.current_state()
     | _KafkaPhaseSkipUpdateApiVersions =>
-      _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)
+      _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)?
     | _KafkaPhaseSkipUpdateApiVersionsReconnect =>
-      _statemachine.transition_to(_KafkaPhaseUpdateMetadataReconnect, conn)
+      _statemachine.transition_to(_KafkaPhaseUpdateMetadataReconnect, conn)?
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Error we're in state: " + _statemachine.current_state().string() +
@@ -700,26 +700,26 @@ class _KafkaHandler is CustomTCPConnectionNotify
     partition_id: I32, msg: ProducerKafkaMessage val, auth: _KafkaProducerAuth)
     ?
   =>
-    let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key()) as
+    let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())? as
       _KafkaProduceApi
     produce_api.combine_and_split_by_message_size_single(_conf, _pending_buffer,
        topic, partition_id, msg, _state.topics_state)
 
-    _maybe_process_pending_buffer(conn)
+    _maybe_process_pending_buffer(conn)?
 
   fun ref send_kafka_messages(conn: KafkaBrokerConnection ref, topic: String,
     msgs: Map[I32, Array[ProducerKafkaMessage val] iso] val, auth:
     _KafkaProducerAuth) ?
   =>
-    let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key()) as
+    let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())? as
       _KafkaProduceApi
     produce_api.combine_and_split_by_message_size(_conf, _pending_buffer, topic,
        msgs, _state.topics_state)
 
-    _maybe_process_pending_buffer(conn)
+    _maybe_process_pending_buffer(conn)?
 
   fun ref _maybe_process_pending_buffer(conn: KafkaBrokerConnection ref) ? =>
-    (_, let num_msgs, _) = _pending_buffer(0)
+    (_, let num_msgs, _) = _pending_buffer(0)?
     if num_msgs == 0 then
       return
     end
@@ -732,7 +732,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       if _pending_buffer.size() > 1 then
         // send everything but last buffer entry since it almost definitely has
         // room for more data to accumulate
-        process_pending_buffer(conn, true)
+        process_pending_buffer(conn, true)?
 
         // cancel and recreate timer for remaining messages to be sent
         _timers.cancel(t)
@@ -744,7 +744,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
         // check if we've reached max_produce_buffer_messages or not
         if num_msgs >= _conf.max_produce_buffer_messages then
           // send all messages
-          process_pending_buffer(conn)
+          process_pending_buffer(conn)?
 
           // cancel timer because we're sending all messages now
           _timers.cancel(t)
@@ -762,18 +762,18 @@ class _KafkaHandler is CustomTCPConnectionNotify
         _timers(consume timer)
       else
         // if no, send messages
-        process_pending_buffer(conn)
+        process_pending_buffer(conn)?
       end
     end
 
   fun ref _send_pending_messages(conn: CustomTCPConnection ref) ? =>
     send_batch_timer = None
-    process_pending_buffer(conn)
+    process_pending_buffer(conn)?
 
   fun ref process_pending_buffer(conn: CustomTCPConnection ref,
     send_all_but_one: Bool = false) ?
   =>
-    (_, let n, _) = _pending_buffer(0)
+    (_, let n, _) = _pending_buffer(0)?
     if n == 0 then
       return
     end
@@ -782,9 +782,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
     while (_requests_buffer.size() < _conf.max_inflight_requests) and
       (_pending_buffer.size() > limit) do
       // TODO: Figure out a way to avoid shift... maybe use a ring buffer?
-      (let size, let num_msgs, let msgs) = _pending_buffer.shift()
+      (let size, let num_msgs, let msgs) = _pending_buffer.shift()?
 
-      conn.get_handler().writev(produce_messages(size, num_msgs, consume msgs))
+      conn.get_handler().writev(produce_messages(size, num_msgs, consume msgs)?)
     end
     if _pending_buffer.size() == 0 then
       // initialize pending buffer
@@ -796,7 +796,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     Array[ProducerKafkaMessage val]]]): Array[ByteSeq] iso^ ?
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name + "producing messages")
-    let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key()) as
+    let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())? as
       _KafkaProduceApi
     let correlation_id = _next_correlation_id()
 
@@ -828,7 +828,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
   // try and fetch messages from kafka
   fun ref consume_messages(conn: CustomTCPConnection ref) ? =>
     if(_conf.consumer_topics.size() > 0) then
-      let fetch_request = fetch_messages()
+      let fetch_request = fetch_messages()?
       match consume fetch_request
       | let fr: Array[ByteSeq] iso =>
         conn.get_handler().writev(consume fr)
@@ -841,7 +841,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
   fun ref fetch_messages(): (Array[ByteSeq] iso^ | None) ?
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name + "fetching messages")
-    let fetch_api = _broker_apis_to_use(_KafkaFetchV0.api_key()) as
+    let fetch_api = _broker_apis_to_use(_KafkaFetchV0.api_key())? as
       _KafkaFetchApi
     let correlation_id = _next_correlation_id()
 
@@ -875,13 +875,13 @@ class _KafkaHandler is CustomTCPConnectionNotify
       end
 
       metadata_refresh_request_outstanding = true
-      conn.get_handler().writev(request_metadata())
+      conn.get_handler().writev(request_metadata()?)
     end
 
   fun ref request_metadata(): Array[ByteSeq] iso^ ?
   =>
     let correlation_id = _next_correlation_id()
-    let metadata_api = _broker_apis_to_use(_KafkaMetadataV0.api_key()) as
+    let metadata_api = _broker_apis_to_use(_KafkaMetadataV0.api_key())? as
       _KafkaMetadataApi
 
     _requests_buffer.push((correlation_id, metadata_api, None))
@@ -890,7 +890,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
   fun ref request_offsets(): Array[ByteSeq] iso^ ?
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name + "Requesting offsets")
-    let offsets_api = _broker_apis_to_use(_KafkaOffsetsV0.api_key()) as
+    let offsets_api = _broker_apis_to_use(_KafkaOffsetsV0.api_key())? as
       _KafkaOffsetsApi
     let correlation_id = _next_correlation_id()
 
@@ -905,7 +905,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       var new_partition_added: Bool = false
       for topic_meta in meta.topics_metadata.values() do
         let topic = topic_meta.topic
-        let topic_state = try _state.topics_state(topic)
+        let topic_state = try _state.topics_state(topic)?
           else
             _conf.logger(Error) and _conf.logger.log(Error, _name +
               "Unable to get topic state for topic: " + topic +
@@ -935,7 +935,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
           let partition_id = part_meta.partition_id
           let part_state =
             try
-              topic_state.partitions_state(partition_id)
+              topic_state.partitions_state(partition_id)?
             else
               new_partition_added = true
 
@@ -1026,7 +1026,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
                   lc_msgs.push(m)
                 end
                 partition_msgs(partition_id) = consume lc_msgs
-                let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())
+                let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())?
                   as _KafkaProduceApi
                 produce_api.combine_and_split_by_message_size(_conf,
                   _pending_buffer, topic, consume val partition_msgs
@@ -1059,7 +1059,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
                 end
                 partition_msgs(partition_id) = consume lc_msgs
 
-                (_, let new_leader_broker_tag) = _brokers(part_state.leader)
+                (_, let new_leader_broker_tag) = _brokers(part_state.leader)?
 
                 // send messages over to other broker
                 // TODO: Implement logic to send fetch offsets so new leader
@@ -1086,14 +1086,14 @@ class _KafkaHandler is CustomTCPConnectionNotify
     match _statemachine.current_state()
     | _KafkaPhaseUpdateMetadata =>
       try
-        _statemachine.transition_to(_KafkaPhaseUpdateOffsets, conn)
+        _statemachine.transition_to(_KafkaPhaseUpdateOffsets, conn)?
       else
         _conf.logger(Error) and _conf.logger.log(Error, _name + "Unable to " +
           "transition to _KafkaPhaseUpdateOffsets. This should never happen.")
       end
     | _KafkaPhaseUpdateMetadataReconnect =>
       try
-        _statemachine.transition_to(_KafkaPhaseDone, conn)
+        _statemachine.transition_to(_KafkaPhaseDone, conn)?
       else
         _conf.logger(Error) and _conf.logger.log(Error, _name + "Unable to " +
           "transition to _KafkaPhaseDone. This should never happen.")
@@ -1110,7 +1110,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     // TODO: Tell kafka client to unthrottle
     // add new messages to pending buffer for next send opportunity
     try
-      let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key()) as
+      let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())? as
         _KafkaProduceApi
       produce_api.combine_and_split_by_message_size(_conf, _pending_buffer,
         topic, msgs, _state.topics_state)
@@ -1126,11 +1126,11 @@ class _KafkaHandler is CustomTCPConnectionNotify
   =>
     for topic in offsets.values() do
       for part in topic.partitions_offset.values() do
-        _state.topics_state(topic.topic).partitions_state(part.partition_id)
+        _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
           .request_offset = part.offset
-        _state.topics_state(topic.topic).partitions_state(part.partition_id)
+        _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
           .error_code = part.error_code
-        _state.topics_state(topic.topic).partitions_state(part.partition_id)
+        _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
           .timestamp = part.timestamp
       end
     end
@@ -1195,12 +1195,12 @@ class _KafkaHandler is CustomTCPConnectionNotify
     let topics_to_throttle: Map[String, Set[I32] iso] iso =
       recover topics_to_throttle.create() end
     for (topic, topic_response) in produce_response.pairs() do
-      let topic_state = _state.topics_state(topic)
-      let topic_msgs = msgs(topic)
+      let topic_state = _state.topics_state(topic)?
+      let topic_msgs = msgs(topic)?
       for (part, part_response) in topic_response.partition_responses.pairs() do
         let kafka_error = map_kafka_error(part_response.error_code)
-        let partition_msgs = topic_msgs(part)
-        let part_state = topic_state.partitions_state(part)
+        let partition_msgs = topic_msgs(part)?
+        let part_state = topic_state.partitions_state(part)?
         try
           match kafka_error
           | ErrorNone =>
@@ -1221,7 +1221,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
             if not topics_to_throttle.contains(topic) then
               topics_to_throttle(topic) = recover Set[I32] end
             end
-            topics_to_throttle(topic).set(part)
+            topics_to_throttle(topic)?.set(part)
             handle_partition_leader_change(conn,
               kafka_error, topic, part, partition_msgs, part_state)
           else
@@ -1248,7 +1248,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       _conf.logger(Fine) and _conf.logger.log(Fine, _name +
         "Encountered at least one leader change error. Refreshing metadata and
         throttling producers.")
-      refresh_metadata(conn)
+      refresh_metadata(conn)?
       _kafka_client._leader_change_throttle(consume val topics_to_throttle,
         _connection_broker_id)
     end
@@ -1288,13 +1288,13 @@ class _KafkaHandler is CustomTCPConnectionNotify
       end
       try
         if pb_msgs.contains(topic) then
-          let topic_msgs = pb_msgs(topic)
+          let topic_msgs = pb_msgs(topic)?
           if topic_msgs.contains(partition_id) then
             // TODO: add logic to update entries in pending buffer to reflect
             // new size now that messages for this partition have been removed
             // Without the recalc of the new size we don't use bandwidth as
             // efficiently as we would otherwise
-            (_, let partition_msgs) = topic_msgs.remove(partition_id)
+            (_, let partition_msgs) = topic_msgs.remove(partition_id)?
 
             // buffer messages for when new leader is elected
             let lcpm = partition_state.leader_change_pending_messages
@@ -1381,11 +1381,11 @@ class _KafkaHandler is CustomTCPConnectionNotify
       "processing and distributing fetched data")
     for (topic, topic_result) in fetch_results.pairs() do
       try
-        let ts = _state.topics_state(topic)
+        let ts = _state.topics_state(topic)?
         for (part, part_result) in topic_result.partition_responses.pairs() do
           for m in part_result.messages.values() do
             try
-              if m.get_offset() >= ts.partitions_state(part).request_offset then
+              if m.get_offset() >= ts.partitions_state(part)?.request_offset then
                 let consumer = ts.message_handler(ts.consumers, m)
                 match consumer
                 | let c: KafkaConsumer tag =>
@@ -1399,8 +1399,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
               else
                 _conf.logger(Fine) and _conf.logger.log(Fine, _name +
                   "Ignoring message because offset is lower than requested. " +
-                  "Requested offset: " + _state.topics_state(topic)
-                  .partitions_state(part).request_offset.string() +
+                  "Requested offset: " + _state.topics_state(topic)?
+                  .partitions_state(part)?.request_offset.string() +
                   ", message: " + m.string())
               end
             else
@@ -1419,7 +1419,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
   fun ref track_consumer_unacked_message(msg: KafkaMessage val) =>
     try
-       _state.consumer_unacked_offsets(msg._get_topic_partition())
+       _state.consumer_unacked_offsets(msg._get_topic_partition())?
          .set(msg.get_offset())
     else
       let po = recover Set[I64] end
@@ -1434,7 +1434,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     for topic in fetch_results.values() do
       for part in topic.partition_responses.values() do
         if part.largest_offset_seen != -1 then
-          _state.topics_state(topic.topic).partitions_state(part.partition_id)
+          _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
             .request_offset = part.largest_offset_seen + 1
         end
       end
@@ -1447,12 +1447,12 @@ class _KafkaHandler is CustomTCPConnectionNotify
     network_received_timestamp: U64) ?
   =>
     (let sent_correlation_id, let request_type, let extra_request_data) =
-      _requests_buffer.shift()
+      _requests_buffer.shift()?
 
     let rb = recover ref Reader end
     rb.append(data)
 
-    let resp_correlation_id = _KafkaResponseHeader.decode(_conf.logger, rb)
+    let resp_correlation_id = _KafkaResponseHeader.decode(_conf.logger, rb)?
 
     if resp_correlation_id != sent_correlation_id then
       _conf.logger(Error) and _conf.logger.log(Error, _name +
@@ -1466,13 +1466,13 @@ class _KafkaHandler is CustomTCPConnectionNotify
     | let api_versions_api: _KafkaApiVersionsApi
       =>
         update_api_versions_to_use(api_versions_api
-          .decode_response(_conf.logger, rb))
+          .decode_response(_conf.logger, rb)?)
         // Update metadata
         match _statemachine.current_state()
         | _KafkaPhaseUpdateApiVersions =>
-          _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)
+          _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)?
         | _KafkaPhaseUpdateApiVersionsReconnect =>
-          _statemachine.transition_to(_KafkaPhaseUpdateMetadataReconnect, conn)
+          _statemachine.transition_to(_KafkaPhaseUpdateMetadataReconnect, conn)?
         else
           _conf.logger(Error) and _conf.logger.log(Error, _name +
             "Error we're in state: " + _statemachine.current_state().string() +
@@ -1482,7 +1482,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       =>
         metadata_refresh_request_outstanding = false
 
-        let metadata = metadata_api.decode_response(_conf.logger, rb)
+        let metadata = metadata_api.decode_response(_conf.logger, rb)?
         _conf.logger(Fine) and _conf.logger.log(Fine, _name + metadata.string())
 
         // send kafka client updated metadata
@@ -1511,7 +1511,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
         end
     | let offsets_api: _KafkaOffsetsApi
       =>
-        let offsets = offsets_api.decode_response(_conf.logger, rb)
+        let offsets = offsets_api.decode_response(_conf.logger, rb)?
 
         if _conf.logger(Fine) then
           var offsets_str = recover ref String end
@@ -1521,15 +1521,15 @@ class _KafkaHandler is CustomTCPConnectionNotify
           _conf.logger.log(Fine, _name + offsets_str.string())
         end
 
-        update_offsets(offsets)
-        _statemachine.transition_to(_KafkaPhaseDone, conn)
+        update_offsets(offsets)?
+        _statemachine.transition_to(_KafkaPhaseDone, conn)?
     | let fetch_api: _KafkaFetchApi
       =>
         _conf.logger(Fine) and _conf.logger.log(Fine, _name +
           "decoding fetched data")
         (let throttle_time_ms, let fetched_data) =
           fetch_api.decode_response(conn, _conf.logger, rb,
-            _state.topics_state)
+            _state.topics_state)?
 
         if _conf.logger(Fine) then
           var fetched_str = recover ref String end
@@ -1540,7 +1540,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
         end
 
         process_fetched_data(fetched_data, network_received_timestamp)
-        update_offsets_fetch_response(fetched_data)
+        update_offsets_fetch_response(fetched_data)?
         let timer = Timer(_KafkaFetchRequestTimerNotify(conn),
           _conf.fetch_interval)
         fetch_data_timer = timer
@@ -1550,7 +1550,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
         _conf.logger(Fine) and _conf.logger.log(Fine, _name +
           "decoding produce response")
         (let produce_response, let throttle_time) =
-          produce_api.decode_response(_conf.logger, rb)
+          produce_api.decode_response(_conf.logger, rb)?
         (let size, let num_msgs, let msgs) = match extra_request_data
            | (let s: I32, let n: U64, let m: Map[String, Map[I32,
              Array[ProducerKafkaMessage val]]]) => (s, n, m)
@@ -1570,7 +1570,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
         end
 
         process_produce_response(produce_response, throttle_time, consume msgs,
-          conn)
+          conn)?
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Unknown kafka response type")
@@ -1580,7 +1580,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     // check if batch send timer is active; if not, processing pending buffer so
     // we make progress if we're below max in-flight messages again
     if send_batch_timer is None then
-      process_pending_buffer(conn)
+      process_pending_buffer(conn)?
     end
 
 

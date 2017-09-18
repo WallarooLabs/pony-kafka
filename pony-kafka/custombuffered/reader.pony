@@ -137,17 +137,17 @@ class Reader
       var rem = n
 
       while rem > 0 do
-        let node = _chunks.head()
-        (var data, var offset) = node()
+        let node = _chunks.head()?
+        (var data, var offset) = node()?
         let avail = data.size() - offset
 
         if avail > rem then
-          node() = (data, offset + rem)
+          node()? = (data, offset + rem)
           break
         end
 
         rem = rem - avail
-        _chunks.shift()
+        _chunks.shift()?
       end
 
       this
@@ -168,8 +168,8 @@ class Reader
     var i = USize(0)
 
     while i < len do
-      let node = _chunks.head()
-      (let data, let offset) = node()
+      let node = _chunks.head()?
+      (let data, let offset) = node()?
 
       let avail = data.size() - offset
       let need = len - i
@@ -182,12 +182,12 @@ class Reader
       end
 
       if avail > need then
-        node() = (data, offset + need)
+        node()? = (data, offset + need)
         break
       end
 
       i = i + copy_len
-      _chunks.shift()
+      _chunks.shift()?
     end
 
     consume out
@@ -200,8 +200,8 @@ class Reader
     but it is removed from the buffer. To read a line of text, prefer line()
     that handles \n and \r\n.
     """
-    let b = block(_distance_of(separator) - 1)
-    read_byte()
+    let b = block(_distance_of(separator)? - 1)?
+    read_byte()?
     consume b
 
   fun ref line(): String ? =>
@@ -209,15 +209,15 @@ class Reader
     Return a \n or \r\n terminated line as a string. The newline is not
     included in the returned string, but it is removed from the network buffer.
     """
-    let len = _search_length()
+    let len = _search_length()?
 
     _available = _available - len
     var out = recover String(len) end
     var i = USize(0)
 
     while i < len do
-      let node = _chunks.head()
-      (let data, let offset) = node()
+      let node = _chunks.head()?
+      (let data, let offset) = node()?
 
       let avail = data.size() - offset
       let need = len - i
@@ -226,16 +226,16 @@ class Reader
       out.append(data, offset, copy_len)
 
       if avail > need then
-        node() = (data, offset + need)
+        node()? = (data, offset + need)
         break
       end
 
       i = i + copy_len
-      _chunks.shift()
+      _chunks.shift()?
     end
 
     out.truncate(len -
-      if (len >= 2) and (out.at_offset(-2) == '\r') then 2 else 1 end)
+      if (len >= 2) and (out.at_offset(-2)? == '\r') then 2 else 1 end)
 
     consume out
 
@@ -243,17 +243,17 @@ class Reader
     """
     Get a single byte.
     """
-    let node = _chunks.head()
-    (var data, var offset) = node()
-    let r = data(offset)
+    let node = _chunks.head()?
+    (var data, var offset) = node()?
+    let r = data(offset)?
 
     offset = offset + 1
     _available = _available - 1
 
     if offset < data.size() then
-      node() = (data, offset)
+      node()? = (data, offset)
     else
-      _chunks.shift()
+      _chunks.shift()?
     end
     r
 
@@ -273,8 +273,8 @@ class Reader
     var i = USize(0)
 
     while i < len do
-      let node = _chunks.head()
-      (let data, let offset) = node()
+      let node = _chunks.head()?
+      (let data, let offset) = node()?
 
       let avail = data.size() - offset
       let need = len - i
@@ -283,7 +283,7 @@ class Reader
       let next_segment = data.trim(offset, offset + copy_len)
 
       if avail > need then
-        node() = (data, offset + need)
+        node()? = (data, offset + need)
         if out.size() == 0 then
           return next_segment
         else
@@ -295,7 +295,7 @@ class Reader
       end
 
       i = i + copy_len
-      _chunks.shift()
+      _chunks.shift()?
     end
 
     consume out
@@ -323,8 +323,8 @@ class Reader
 
     var out = recover Array[Array[U8] val] end
 
-    let node = _chunks.head()
-    (let data, let offset) = node()
+    let node = _chunks.head()?
+    (let data, let offset) = node()?
 
     let avail = data.size() - offset
     let need = len
@@ -332,7 +332,7 @@ class Reader
 
     if avail >= need then
       let next_segment = data.trim(offset, offset + copy_len)
-      node() = (data, offset + need)
+      node()? = (data, offset + need)
       _available = _available - len
       return next_segment
     end
@@ -340,7 +340,7 @@ class Reader
     @printf[I32](("Not enough contiguous data. Avail: " + avail.string() +
       ", need: " + need.string() + ", total available: " + _available.string() +
       "\n").cstring())
-    node() = (data, offset)
+    node()? = (data, offset)
     error
 
   fun box peek_byte(offset: USize = 0): U8 ? =>
@@ -352,15 +352,15 @@ class Reader
     var iter = _chunks.nodes()
 
     while true do
-      let node = iter.next()
-      (var data, var node_offset) = node()
+      let node = iter.next()?
+      (var data, var node_offset) = node()?
       offset' = offset' + node_offset
 
       let data_size = data.size()
       if offset' >= data_size then
         offset' = offset' - data_size
       else
-        return data(offset')
+        return data(offset')?
       end
     end
 
@@ -380,8 +380,8 @@ class Reader
     var iter = _chunks.nodes()
 
     while true do
-      let node = iter.next()
-      (var data, var node_offset) = node()
+      let node = iter.next()?
+      (var data, var node_offset) = node()?
       offset' = offset' + node_offset
 
       let data_size = data.size()
@@ -399,8 +399,8 @@ class Reader
         out.push(data.trim(offset'))
 
         while i < len do
-          let node' = iter.next()
-          (let data', let offset'') = node'()
+          let node' = iter.next()?
+          (let data', let offset'') = node'()?
 
           let avail = data'.size() - offset''
           let need = len - i
@@ -446,14 +446,14 @@ class Reader
 
       prev.next() as ListNode[(Array[U8] val, USize)]
     else
-      _chunks.head()
+      _chunks.head()?
     end
 
     while true do
-      (var data, var offset) = node()
+      (var data, var offset) = node()?
 
       try
-        let len = (_search_len + data.find(byte, offset) + 1) - offset
+        let len = (_search_len + data.find(byte, offset)? + 1) - offset
         _search_node = None
         _search_len = 0
         return len
@@ -476,4 +476,4 @@ class Reader
     Get the length of a pending line. Raise an error if there is no pending
     line.
     """
-    _distance_of('\n')
+    _distance_of('\n')?

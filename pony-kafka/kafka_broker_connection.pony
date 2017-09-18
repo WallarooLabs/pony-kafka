@@ -38,7 +38,7 @@ trait KafkaBrokerConnection is CustomTCPConnection
   =>
     try
       ((get_handler() as CustomTCPConnectionHandler).notify as
-        _KafkaHandler).send_kafka_messages(this, topic, msgs_to_send, auth)
+        _KafkaHandler).send_kafka_messages(this, topic, msgs_to_send, auth)?
     end
 
   be send_kafka_message(topic: String, partition_id: I32,
@@ -47,7 +47,7 @@ trait KafkaBrokerConnection is CustomTCPConnection
     try
       ((get_handler() as CustomTCPConnectionHandler).notify as
         _KafkaHandler).send_kafka_message(this, topic, partition_id,
-        msg_to_send, auth)
+        msg_to_send, auth)?
     end
 
   be message_consumed(msg: KafkaMessage val, success: Bool) =>
@@ -99,19 +99,19 @@ trait KafkaBrokerConnection is CustomTCPConnection
   be _consume_messages() =>
     try
       ((get_handler() as CustomTCPConnectionHandler).notify as
-        _KafkaHandler).consume_messages(this)
+        _KafkaHandler).consume_messages(this)?
     end
 
   be _refresh_metadata() =>
     try
       ((get_handler() as CustomTCPConnectionHandler).notify as
-        _KafkaHandler).refresh_metadata(this)
+        _KafkaHandler).refresh_metadata(this)?
     end
 
   be _send_pending_messages() =>
     try
       ((get_handler() as CustomTCPConnectionHandler).notify as
-        _KafkaHandler)._send_pending_messages(this)
+        _KafkaHandler)._send_pending_messages(this)?
     end
 
   be _leader_change_throttle_ack(topics_to_throttle: Map[String, Set[I32] iso]
