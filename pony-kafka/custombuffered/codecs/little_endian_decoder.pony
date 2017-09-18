@@ -28,6 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 use ".."
+use "../../utils/bool_converter"
 use "itertools"
 
 primitive LittleEndianDecoder
@@ -41,7 +42,7 @@ primitive LittleEndianDecoder
     """
     Get a Bool. Raise an error if there isn't enough data.
     """
-    u8(rb).bool()
+    BoolConverter.u8_to_bool(u8(rb))
 
   fun i8(rb: Reader): I8 ? =>
     """

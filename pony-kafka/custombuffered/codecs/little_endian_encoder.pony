@@ -28,6 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 use ".."
+use "../../utils/bool_converter"
 
 primitive LittleEndianEncoder
   fun u8(wb: Writer, data: U8) =>
@@ -46,7 +47,7 @@ primitive LittleEndianEncoder
     """
     Write a Bool to the buffer.
     """
-    u8(wb, data.u8())
+    u8(wb, BoolConverter.bool_to_u8(data))
 
   fun u16(wb: Writer, data: U16) =>
     """

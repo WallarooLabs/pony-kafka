@@ -30,7 +30,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use "collections"
 use "net"
 
-use "../asio_event"
+use "../utils/asio_event"
 
 use @pony_asio_event_create[AsioEventID](owner: AsioEventNotify, fd: U32,
   flags: U32, nsec: U64, noisy: Bool, auto_resub: Bool)
