@@ -65,8 +65,9 @@ class _KafkaState
 
   fun string(): String =>
     var topm_str = recover ref String end
-    for t in topics_state.values() do topm_str.append(", ").append(t.string())
-      end
+    for t in topics_state.values() do
+      topm_str.>append(", ").>append(t.string())
+    end
     "KafkaState: [ "
       + "topics_state = " + topm_str
       + ", controller_id = " + controller_id.string()
@@ -95,7 +96,8 @@ class _KafkaTopicState
   fun string(): String =>
     var parts_str = recover ref String end
     for p in partitions_state.values() do
-      parts_str.append(", ").append(p.string()) end
+      parts_str.>append(", ").>append(p.string())
+    end
     "KafkaTopicState: [ "
       + "topic_error_code = " + topic_error_code.string()
       + ", topic = " + topic.string()
@@ -138,10 +140,13 @@ class _KafkaTopicPartitionState
 
   fun string(): String =>
     var replicas_str = recover ref String end
-    for r in replicas.values() do replicas_str.append(", ").append(r.string())
-      end
+    for r in replicas.values() do
+      replicas_str.>append(", ").>append(r.string())
+    end
     var isrs_str = recover ref String end
-    for i in isrs.values() do isrs_str.append(", ").append(i.string()) end
+    for i in isrs.values() do
+      isrs_str.>append(", ").>append(i.string())
+    end
     "KafkaTopicPartitionMetadata: [ "
       + "partition_error_code = " + partition_error_code.string()
       + ", partition_id = " + partition_id.string()
@@ -1510,8 +1515,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
         if _conf.logger(Fine) then
           var offsets_str = recover ref String end
-          for o in offsets.values() do offsets_str.append(", ")
-            .append(o.string()) end
+          for o in offsets.values() do
+            offsets_str.>append(", ").>append(o.string())
+          end
           _conf.logger.log(Fine, _name + offsets_str.string())
         end
 
@@ -1522,12 +1528,14 @@ class _KafkaHandler is CustomTCPConnectionNotify
         _conf.logger(Fine) and _conf.logger.log(Fine, _name +
           "decoding fetched data")
         (let throttle_time_ms, let fetched_data) =
-          fetch_api.decode_response(conn, _conf.logger, rb, _state.topics_state)
+          fetch_api.decode_response(conn, _conf.logger, rb,
+            _state.topics_state)
 
         if _conf.logger(Fine) then
           var fetched_str = recover ref String end
-          for f in fetched_data.values() do fetched_str.append(", ")
-            .append(f.string()) end
+          for f in fetched_data.values() do
+            fetched_str.>append(", ").>append(f.string())
+          end
           _conf.logger.log(Fine, _name + fetched_str.string())
         end
 
@@ -1555,8 +1563,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
         if _conf.logger(Fine) then
           var produced_str = recover ref String end
-          for p in produce_response.values() do produced_str.append(", ")
-            .append(p.string()) end
+          for p in produce_response.values() do
+            produced_str.>append(", ").>append(p.string())
+          end
           _conf.logger.log(Fine, _name + produced_str.string())
         end
 
