@@ -30,6 +30,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use "collections"
 use "net"
 
+use "../asio_event"
+
 use @pony_asio_event_create[AsioEventID](owner: AsioEventNotify, fd: U32,
   flags: U32, nsec: U64, noisy: Bool, auto_resub: Bool)
 use @pony_asio_event_fd[U32](event: AsioEventID)
@@ -165,7 +167,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     end
     _connected = true
     ifdef linux then
-      AsioEvent.set_writeable(_event, true)
+      AsioEventHelper.set_writeable(_event, true)
     end
     _writeable = true
     _read_buf = recover Array[U8].undefined(init_size) end
@@ -276,19 +278,19 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     close()
     notify.dispose()
 
-  fun local_address(): IPAddress =>
+  fun local_address(): NetAddress =>
     """
     Return the local IP address.
     """
-    let ip = recover IPAddress end
+    let ip = recover NetAddress end
     @pony_os_sockname[Bool](_fd, ip)
     ip
 
-  fun remote_address(): IPAddress =>
+  fun remote_address(): NetAddress =>
     """
     Return the remote IP address.
     """
-    let ip = recover IPAddress end
+    let ip = recover NetAddress end
     @pony_os_peername[Bool](_fd, ip)
     ip
 
@@ -664,7 +666,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
             ifdef linux then
               // this is safe because asio thread isn't currently subscribed
               // for a read event so will not be writing to the readable flag
-              AsioEvent.set_readable(_event, false)
+              AsioEventHelper.set_readable(_event, false)
               _readable = false
               @pony_asio_event_resubscribe_read(_event)
             else
@@ -731,7 +733,11 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     ifdef windows then
       _close()
     else
-      _hard_close()
+      if _muted then
+        _hard_close()
+      else
+       _close()
+     end
     end
 
   fun ref _close() =>
@@ -801,8 +807,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       _readable = false
       _writeable = false
       ifdef linux then
-        AsioEvent.set_readable(_event, false)
-        AsioEvent.set_writeable(_event, false)
+        AsioEventHelper.set_readable(_event, false)
+        AsioEventHelper.set_writeable(_event, false)
       end
     end
 
@@ -822,7 +828,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       ifdef linux then
         // this is safe because asio thread isn't currently subscribed
         // for a write event so will not be writing to the readable flag
-        AsioEvent.set_writeable(_event, false)
+        AsioEventHelper.set_writeable(_event, false)
         @pony_asio_event_resubscribe_write(_event)
       end
     end

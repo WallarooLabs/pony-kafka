@@ -443,7 +443,7 @@ class _KafkaMetadata
 // https://github.com/edenhill/librdkafka/blob/master/src/rdkafka_lz4.c#L109
 primitive KafkaLZ4Compression
   fun break_frame_header(logger: Logger[String], data: Array[U8] ref) ? =>
-    let magic = [ as U8: 0x04, 0x22, 0x4d, 0x18 ]
+    let magic = [as U8: 0x04; 0x22; 0x4d; 0x18]
 
     if data.size() < 7 then
       logger(Error) and logger.log(Error,
@@ -486,7 +486,7 @@ primitive KafkaLZ4Compression
   fun unbreak_frame_header(logger: Logger[String], data: Array[U8] val):
     Array[U8] val ?
   =>
-    let magic = [ as U8: 0x04, 0x22, 0x4d, 0x18 ]
+    let magic = [as U8: 0x04; 0x22; 0x4d; 0x18]
 
     if data.size() < 7 then
       logger(Error) and logger.log(Error,
@@ -863,9 +863,9 @@ primitive _KafkaMessageSetCodecV0V1
           (timestamp, timestamp_type)
         end
       return_los = offset
-      return_msgs = recover [ recover KafkaMessage._create(consume key, consume
-        value, broker_conn, offset, crc, magic_byte, attributes,
-        final_timestamp, final_timestamp_type, topic_partition) end ] end
+      return_msgs = recover [recover KafkaMessage._create(consume key,
+        consume value, broker_conn, offset, crc, magic_byte, attributes,
+        final_timestamp, final_timestamp_type, topic_partition) end] end
     | KafkaGzipTopicCompression() =>
       ifdef "no-zlib" then
         logger(Error) and logger.log(Error, "GZip/Zlib compression support " +

@@ -64,7 +64,7 @@ primitive Snappy
 
   fun decompress_java(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
     let snappy_java_hdr_size: USize = 16
-    let snappy_java_magic = [ as U8: 0x82, 'S', 'N', 'A', 'P', 'P', 'Y', 0 ]
+    let snappy_java_magic = [as U8: 0x82; 'S'; 'N'; 'A'; 'P'; 'P'; 'Y'; 0]
 
 
     if data.size() <= (snappy_java_hdr_size + 4) then
@@ -243,7 +243,7 @@ primitive Snappy
     block_size: USize = 32*1024): Array[U8] iso ?
   =>
     let snappy_java_hdr_size: USize = 16
-    let snappy_java_magic = [ as U8: 0x82, 'S', 'N', 'A', 'P', 'P', 'Y', 0 ]
+    let snappy_java_magic = [as U8: 0x82; 'S'; 'N'; 'A'; 'P'; 'P'; 'Y'; 0]
 
     let max_size = @snappy_max_compressed_length(data.size())
     let buffer = recover Array[U8](max_size + 16) end
