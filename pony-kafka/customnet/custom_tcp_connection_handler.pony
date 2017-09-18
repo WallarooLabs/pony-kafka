@@ -731,11 +731,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     ifdef windows then
       _close()
     else
-      if _muted then
-        _hard_close()
-      else
-       _close()
-     end
+      _hard_close()
     end
 
   fun ref _close() =>
