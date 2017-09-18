@@ -67,67 +67,67 @@ class iso _TestReader is UnitTest
     b.append(recover [as U8: 'r'; 'e'; '\r'; '\n'] end)
 
     // These expectations peek into the buffer without consuming bytes.
-    h.assert_eq[U8](LittleEndianDecoder.peek_u8(b), 0x42)
-    h.assert_eq[U16](BigEndianDecoder.peek_u16(b, 1), 0xDEAD)
-    h.assert_eq[U16](LittleEndianDecoder.peek_u16(b, 3), 0xDEAD)
-    h.assert_eq[U32](BigEndianDecoder.peek_u32(b, 5), 0xDEADBEEF)
-    h.assert_eq[U32](LittleEndianDecoder.peek_u32(b, 9), 0xDEADBEEF)
-    h.assert_eq[U64](BigEndianDecoder.peek_u64(b, 13), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U64](LittleEndianDecoder.peek_u64(b, 21), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U128](BigEndianDecoder.peek_u128(b, 29),
+    h.assert_eq[U8](LittleEndianDecoder.peek_u8(b)?, 0x42)
+    h.assert_eq[U16](BigEndianDecoder.peek_u16(b, 1)?, 0xDEAD)
+    h.assert_eq[U16](LittleEndianDecoder.peek_u16(b, 3)?, 0xDEAD)
+    h.assert_eq[U32](BigEndianDecoder.peek_u32(b, 5)?, 0xDEADBEEF)
+    h.assert_eq[U32](LittleEndianDecoder.peek_u32(b, 9)?, 0xDEADBEEF)
+    h.assert_eq[U64](BigEndianDecoder.peek_u64(b, 13)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U64](LittleEndianDecoder.peek_u64(b, 21)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U128](BigEndianDecoder.peek_u128(b, 29)?,
       0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
-    h.assert_eq[U128](LittleEndianDecoder.peek_u128(b, 45),
+    h.assert_eq[U128](LittleEndianDecoder.peek_u128(b, 45)?,
       0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
 
-    h.assert_eq[U8](LittleEndianDecoder.peek_u8(b, 61), 'h')
-    h.assert_eq[U8](LittleEndianDecoder.peek_u8(b, 62), 'i')
+    h.assert_eq[U8](LittleEndianDecoder.peek_u8(b, 61)?, 'h')
+    h.assert_eq[U8](LittleEndianDecoder.peek_u8(b, 62)?, 'i')
 
     // These expectations consume bytes from the head of the buffer.
-    h.assert_eq[U8](LittleEndianDecoder.u8(b), 0x42)
-    h.assert_eq[U16](BigEndianDecoder.u16(b), 0xDEAD)
-    h.assert_eq[U16](LittleEndianDecoder.u16(b), 0xDEAD)
-    h.assert_eq[U32](BigEndianDecoder.u32(b), 0xDEADBEEF)
-    h.assert_eq[U32](LittleEndianDecoder.u32(b), 0xDEADBEEF)
-    h.assert_eq[U64](BigEndianDecoder.u64(b), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U64](LittleEndianDecoder.u64(b), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U128](BigEndianDecoder.u128(b),
+    h.assert_eq[U8](LittleEndianDecoder.u8(b)?, 0x42)
+    h.assert_eq[U16](BigEndianDecoder.u16(b)?, 0xDEAD)
+    h.assert_eq[U16](LittleEndianDecoder.u16(b)?, 0xDEAD)
+    h.assert_eq[U32](BigEndianDecoder.u32(b)?, 0xDEADBEEF)
+    h.assert_eq[U32](LittleEndianDecoder.u32(b)?, 0xDEADBEEF)
+    h.assert_eq[U64](BigEndianDecoder.u64(b)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U64](LittleEndianDecoder.u64(b)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U128](BigEndianDecoder.u128(b)?,
       0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
-    h.assert_eq[U128](LittleEndianDecoder.u128(b),
+    h.assert_eq[U128](LittleEndianDecoder.u128(b)?,
       0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
 
-    h.assert_eq[String](b.line(), "hi")
-    h.assert_eq[String](b.line(), "there")
+    h.assert_eq[String](b.line()?, "hi")
+    h.assert_eq[String](b.line()?, "there")
 
     b.append(recover [as U8: 'h'; 'i'] end)
 
     try
-      b.line()
+      b.line()?
       h.fail("shouldn't have a line")
     end
 
     b.append(recover [as U8: '!'; '\n'] end)
-    h.assert_eq[String](b.line(), "hi!")
+    h.assert_eq[String](b.line()?, "hi!")
 
     b.append(recover [as U8: 's'; 't'; 'r'; '1'] end)
     try
-      b.read_until(0)
+      b.read_until(0)?
       h.fail("should fail reading until 0")
     end
     b.append(recover [as U8: 0] end)
     b.append(recover [as U8: 'f'; 'i'; 'e'; 'l'; 'd'; '1'; ';'
       'f'; 'i'; 'e'; 'l'; 'd'; '2'; ';'; ';'] end)
-    h.assert_eq[String](String.from_array(b.read_until(0)), "str1")
-    h.assert_eq[String](String.from_array(b.read_until(';')), "field1")
-    h.assert_eq[String](String.from_array(b.read_until(';')), "field2")
+    h.assert_eq[String](String.from_array(b.read_until(0)?), "str1")
+    h.assert_eq[String](String.from_array(b.read_until(';')?), "field1")
+    h.assert_eq[String](String.from_array(b.read_until(';')?), "field2")
     // read an empty field
-    h.assert_eq[String](String.from_array(b.read_until(';')), "")
+    h.assert_eq[String](String.from_array(b.read_until(';')?), "")
 
     b.append(recover [as U8: 0] end)
     b.append(recover [as U8: 172; 2] end)
 
 
-    h.assert_eq[U8](VarIntDecoder.u8(b), 0)
-    h.assert_eq[U32](VarIntDecoder.u32(b), 300)
+    h.assert_eq[U8](VarIntDecoder.u8(b)?, 0)
+    h.assert_eq[U32](VarIntDecoder.u32(b)?, 300)
 
     // the last byte is consumed by the reader
     h.assert_eq[USize](b.size(), 0)
@@ -179,97 +179,97 @@ class iso _TestWriter is UnitTest
     end
 
     // These expectations peek into the buffer without consuming bytes.
-    h.assert_eq[U8](BigEndianDecoder.peek_u8(b), 0x42)
-    h.assert_eq[U16](BigEndianDecoder.peek_u16(b, 1), 0xDEAD)
-    h.assert_eq[U16](LittleEndianDecoder.peek_u16(b, 3), 0xDEAD)
-    h.assert_eq[U32](BigEndianDecoder.peek_u32(b, 5), 0xDEADBEEF)
-    h.assert_eq[U32](LittleEndianDecoder.peek_u32(b, 9), 0xDEADBEEF)
-    h.assert_eq[U64](BigEndianDecoder.peek_u64(b, 13), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U64](LittleEndianDecoder.peek_u64(b, 21), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U128](BigEndianDecoder.peek_u128(b, 29),
+    h.assert_eq[U8](BigEndianDecoder.peek_u8(b)?, 0x42)
+    h.assert_eq[U16](BigEndianDecoder.peek_u16(b, 1)?, 0xDEAD)
+    h.assert_eq[U16](LittleEndianDecoder.peek_u16(b, 3)?, 0xDEAD)
+    h.assert_eq[U32](BigEndianDecoder.peek_u32(b, 5)?, 0xDEADBEEF)
+    h.assert_eq[U32](LittleEndianDecoder.peek_u32(b, 9)?, 0xDEADBEEF)
+    h.assert_eq[U64](BigEndianDecoder.peek_u64(b, 13)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U64](LittleEndianDecoder.peek_u64(b, 21)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U128](BigEndianDecoder.peek_u128(b, 29)?,
       0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
-    h.assert_eq[U128](LittleEndianDecoder.peek_u128(b, 45),
+    h.assert_eq[U128](LittleEndianDecoder.peek_u128(b, 45)?,
       0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
 
-    h.assert_eq[U8](BigEndianDecoder.peek_u8(b, 61), 'h')
-    h.assert_eq[U8](BigEndianDecoder.peek_u8(b, 62), 'i')
+    h.assert_eq[U8](BigEndianDecoder.peek_u8(b, 61)?, 'h')
+    h.assert_eq[U8](BigEndianDecoder.peek_u8(b, 62)?, 'i')
 
     var offset: USize = 0
     var pos: USize = 71
 
-    (let x, offset) = VarIntDecoder.peek_u8(b, pos)
+    (let x, offset) = VarIntDecoder.peek_u8(b, pos)?
     h.assert_eq[U8](x, 0)
     pos = pos + offset
 
-    (let x', offset) = VarIntDecoder.peek_u8(b, pos)
+    (let x', offset) = VarIntDecoder.peek_u8(b, pos)?
     h.assert_eq[U8](x', 0x42)
     pos = pos + offset
 
-    (let y, offset) = VarIntDecoder.peek_u16(b, pos)
+    (let y, offset) = VarIntDecoder.peek_u16(b, pos)?
     h.assert_eq[U16](y, 0xDEAD)
     pos = pos + offset
 
-    (let y', offset) = VarIntDecoder.peek_u32(b, pos)
+    (let y', offset) = VarIntDecoder.peek_u32(b, pos)?
     h.assert_eq[U32](y', 0xDEADBEEF)
     pos = pos + offset
 
-    (let y'', offset) = VarIntDecoder.peek_u64(b, pos)
+    (let y'', offset) = VarIntDecoder.peek_u64(b, pos)?
     h.assert_eq[U64](y'', 0xDEADBEEFFEEDFACE)
     pos = pos + offset
 
 
-    (let z, offset) = VarIntDecoder.peek_i8(b, pos)
+    (let z, offset) = VarIntDecoder.peek_i8(b, pos)?
     h.assert_eq[I8](z, -42)
     pos = pos + offset
 
-    (let z', offset) = VarIntDecoder.peek_i16(b, pos)
+    (let z', offset) = VarIntDecoder.peek_i16(b, pos)?
     h.assert_eq[I16](z', -0xEAD)
     pos = pos + offset
 
-    (let z'', offset) = VarIntDecoder.peek_i32(b, pos)
+    (let z'', offset) = VarIntDecoder.peek_i32(b, pos)?
     h.assert_eq[I32](z'', -0xEADBEEF)
     pos = pos + offset
 
-    (let z''', offset) = VarIntDecoder.peek_i64(b, pos)
+    (let z''', offset) = VarIntDecoder.peek_i64(b, pos)?
     h.assert_eq[I64](z''', -0xEADBEEFFEEDFACE)
 
 
     // These expectations consume bytes from the head of the buffer.
-    h.assert_eq[U8](BigEndianDecoder.u8(b), 0x42)
-    h.assert_eq[U16](BigEndianDecoder.u16(b), 0xDEAD)
-    h.assert_eq[U16](LittleEndianDecoder.u16(b), 0xDEAD)
-    h.assert_eq[U32](BigEndianDecoder.u32(b), 0xDEADBEEF)
-    h.assert_eq[U32](LittleEndianDecoder.u32(b), 0xDEADBEEF)
-    h.assert_eq[U64](BigEndianDecoder.u64(b), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U64](LittleEndianDecoder.u64(b), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[U128](BigEndianDecoder.u128(b),
+    h.assert_eq[U8](BigEndianDecoder.u8(b)?, 0x42)
+    h.assert_eq[U16](BigEndianDecoder.u16(b)?, 0xDEAD)
+    h.assert_eq[U16](LittleEndianDecoder.u16(b)?, 0xDEAD)
+    h.assert_eq[U32](BigEndianDecoder.u32(b)?, 0xDEADBEEF)
+    h.assert_eq[U32](LittleEndianDecoder.u32(b)?, 0xDEADBEEF)
+    h.assert_eq[U64](BigEndianDecoder.u64(b)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U64](LittleEndianDecoder.u64(b)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U128](BigEndianDecoder.u128(b)?,
       0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
-    h.assert_eq[U128](LittleEndianDecoder.u128(b),
+    h.assert_eq[U128](LittleEndianDecoder.u128(b)?,
       0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
 
-    h.assert_eq[String](b.line(), "hi")
-    h.assert_eq[String](b.line(), "there")
+    h.assert_eq[String](b.line()?, "hi")
+    h.assert_eq[String](b.line()?, "there")
 
-    h.assert_eq[U8](VarIntDecoder.u8(b), 0)
-    h.assert_eq[U8](VarIntDecoder.u8(b), 0x42)
-    h.assert_eq[U16](VarIntDecoder.u16(b), 0xDEAD)
-    h.assert_eq[U32](VarIntDecoder.u32(b), 0xDEADBEEF)
-    h.assert_eq[U64](VarIntDecoder.u64(b), 0xDEADBEEFFEEDFACE)
-    h.assert_eq[I8](VarIntDecoder.i8(b), -42)
-    h.assert_eq[I16](VarIntDecoder.i16(b), -0xEAD)
-    h.assert_eq[I32](VarIntDecoder.i32(b), -0xEADBEEF)
-    h.assert_eq[I64](VarIntDecoder.i64(b), -0xEADBEEFFEEDFACE)
+    h.assert_eq[U8](VarIntDecoder.u8(b)?, 0)
+    h.assert_eq[U8](VarIntDecoder.u8(b)?, 0x42)
+    h.assert_eq[U16](VarIntDecoder.u16(b)?, 0xDEAD)
+    h.assert_eq[U32](VarIntDecoder.u32(b)?, 0xDEADBEEF)
+    h.assert_eq[U64](VarIntDecoder.u64(b)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[I8](VarIntDecoder.i8(b)?, -42)
+    h.assert_eq[I16](VarIntDecoder.i16(b)?, -0xEAD)
+    h.assert_eq[I32](VarIntDecoder.i32(b)?, -0xEADBEEF)
+    h.assert_eq[I64](VarIntDecoder.i64(b)?, -0xEADBEEFFEEDFACE)
 
-    h.assert_eq[U64](VarIntDecoder.u64(b), 300)
-    h.assert_eq[U64](VarIntDecoder.u64(b), 299)
-    h.assert_eq[U64](VarIntDecoder.u64(b), 4294967295)
+    h.assert_eq[U64](VarIntDecoder.u64(b)?, 300)
+    h.assert_eq[U64](VarIntDecoder.u64(b)?, 299)
+    h.assert_eq[U64](VarIntDecoder.u64(b)?, 4294967295)
 
     b.append(recover [as U8: 'h'; 'i'] end)
 
     try
-      b.line()
+      b.line()?
       h.fail("shouldn't have a line")
     end
 
     b.append(recover [as U8: '!'; '\n'] end)
-    h.assert_eq[String](b.line(), "hi!")
+    h.assert_eq[String](b.line()?, "hi!")

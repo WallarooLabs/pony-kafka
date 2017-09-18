@@ -150,7 +150,7 @@ primitive DataGen
       let a = recover Array[U8] end
       a.undefined(msg_size)
       let b = consume val a
-      part_msgs(0).push(recover iso ProducerKafkaMessage(p, b, b, b.size()) end)
+      part_msgs(0)?.push(recover iso ProducerKafkaMessage(p, b, b, b.size()) end)
     end
 
     part_msgs
@@ -218,11 +218,11 @@ primitive _RunOffsetsApiTest
     end
 
     let remaining_size = _KafkaI32Codec.decode(logger, rb,
-      "error decoding size")
+      "error decoding size")?
     h.assert_eq[USize](remaining_size.usize(), rb.size())
 
     (let api_key', let api_version', let correlation_id', let client_name') =
-      _KafkaRequestHeader.decode(logger, rb)
+      _KafkaRequestHeader.decode(logger, rb)?
 
     h.assert_eq[I16](api_key', api_to_use.api_key())
     h.assert_eq[I16](api_version', api_to_use.version())
@@ -230,14 +230,14 @@ primitive _RunOffsetsApiTest
     h.assert_eq[String](client_name', conf.client_name)
 
     (let replica_id', let topics_requested') = api_to_use.decode_request(logger,
-      rb)
+      rb)?
     h.assert_eq[I32](replica_id', conf.replica_id)
 
     for (t, ts) in state.topics_state.pairs() do
       for (part_id, part_state) in ts.partitions_state.pairs() do
         if part_state.current_leader then
           (let request_timestamp', let num_requested') =
-            topics_requested'(t)(part_id)
+            topics_requested'(t)?(part_id)?
           h.assert_eq[I64](request_timestamp', part_state.request_timestamp)
           h.assert_eq[I32](num_requested', 1)
         end
@@ -298,11 +298,11 @@ primitive _RunProduceApiTest
 
 
     let remaining_size = _KafkaI32Codec.decode(logger, rb,
-      "error decoding size")
+      "error decoding size")?
     h.assert_eq[USize](remaining_size.usize(), rb.size())
 
     (let api_key', let api_version', let correlation_id', let client_name') =
-      _KafkaRequestHeader.decode(logger, rb)
+      _KafkaRequestHeader.decode(logger, rb)?
 
     h.assert_eq[I16](api_key', api_to_use.api_key())
     h.assert_eq[I16](api_version', api_to_use.version())
@@ -311,7 +311,7 @@ primitive _RunProduceApiTest
 
     let broker_conn = _MockKafkaBrokerConnection
     (let produce_acks', let produce_timeout', let msgs') =
-      api_to_use.decode_request(broker_conn, logger, rb, state.topics_state)
+      api_to_use.decode_request(broker_conn, logger, rb, state.topics_state)?
 
     h.assert_eq[I16](produce_acks', conf.produce_acks)
     h.assert_eq[I32](produce_timeout', conf.produce_timeout_ms)
@@ -319,16 +319,16 @@ primitive _RunProduceApiTest
     h.assert_eq[USize](msgs'.size(), msgs.size())
 
     for (t', tm') in msgs'.pairs() do
-      let tm = msgs(t')
+      let tm = msgs(t')?
       h.assert_eq[USize](tm'.size(), tm.size())
       for (p', pm') in tm'.pairs() do
-        let pm = tm(p')
+        let pm = tm(p')?
         h.assert_eq[USize](pm'.size(), pm.size())
         for (i', m') in pm'.pairs() do
-          let m = pm(i')
+          let m = pm(i')?
           match m.get_value()
           | let b: ByteSeq =>
-            h.assert_true(ByteSeqComparator.eq(m'.get_value(), b))
+            h.assert_true(ByteSeqComparator.eq(m'.get_value(), b)?)
           | let ba: Array[ByteSeq] val =>
             let r = recover ref Reader end
             for d in ba.values() do
@@ -338,14 +338,14 @@ primitive _RunProduceApiTest
               end
             end
             h.assert_true(ByteSeqComparator.eq(m'.get_value(),
-              r.block(r.size())))
+              r.block(r.size())?)?)
           else
             // this should never happen
             error
           end
           match m.get_key()
           | let b: ByteSeq =>
-            h.assert_true(KeyComparator.eq(m'.get_key(), b))
+            h.assert_true(KeyComparator.eq(m'.get_key(), b)?)
           | let ba: Array[ByteSeq] val =>
             let r = recover ref Reader end
             for d in ba.values() do
@@ -354,9 +354,9 @@ primitive _RunProduceApiTest
               | let a: Array[U8] val => r.append(a)
               end
             end
-            h.assert_true(KeyComparator.eq(m'.get_key(), r.block(r.size())))
+            h.assert_true(KeyComparator.eq(m'.get_key(), r.block(r.size())?)?)
           | let n: None =>
-            h.assert_true(KeyComparator.eq(m'.get_key(), n))
+            h.assert_true(KeyComparator.eq(m'.get_key(), n)?)
           else
             // this should never happen
             error
@@ -373,7 +373,7 @@ class iso _TestProduceV0ApiNoCompression is UnitTest
   fun name(): String => "kafka/ProduceV0ApiNoCompression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaNoTopicCompression, _KafkaProduceV0)
+    _RunProduceApiTest(h, KafkaNoTopicCompression, _KafkaProduceV0)?
 
 class iso _TestProduceV0ApiGzipCompression is UnitTest
   """
@@ -382,7 +382,7 @@ class iso _TestProduceV0ApiGzipCompression is UnitTest
   fun name(): String => "kafka/ProduceV0ApiGzipCompression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaGzipTopicCompression, _KafkaProduceV0)
+    _RunProduceApiTest(h, KafkaGzipTopicCompression, _KafkaProduceV0)?
 
 class iso _TestProduceV0ApiLZ4Compression is UnitTest
   """
@@ -391,7 +391,7 @@ class iso _TestProduceV0ApiLZ4Compression is UnitTest
   fun name(): String => "kafka/ProduceV0ApiLZ4Compression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaLZ4TopicCompression, _KafkaProduceV0)
+    _RunProduceApiTest(h, KafkaLZ4TopicCompression, _KafkaProduceV0)?
 
 class iso _TestProduceV0ApiSnappyCompression is UnitTest
   """
@@ -400,7 +400,7 @@ class iso _TestProduceV0ApiSnappyCompression is UnitTest
   fun name(): String => "kafka/ProduceV0ApiSnappyCompression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaSnappyTopicCompression, _KafkaProduceV0)
+    _RunProduceApiTest(h, KafkaSnappyTopicCompression, _KafkaProduceV0)?
 
 class iso _TestProduceV1ApiNoCompression is UnitTest
   """
@@ -409,7 +409,7 @@ class iso _TestProduceV1ApiNoCompression is UnitTest
   fun name(): String => "kafka/ProduceV1ApiNoCompression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaNoTopicCompression, _KafkaProduceV1)
+    _RunProduceApiTest(h, KafkaNoTopicCompression, _KafkaProduceV1)?
 
 class iso _TestProduceV1ApiGzipCompression is UnitTest
   """
@@ -418,7 +418,7 @@ class iso _TestProduceV1ApiGzipCompression is UnitTest
   fun name(): String => "kafka/ProduceV1ApiGzipCompression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaGzipTopicCompression, _KafkaProduceV1)
+    _RunProduceApiTest(h, KafkaGzipTopicCompression, _KafkaProduceV1)?
 
 class iso _TestProduceV1ApiLZ4Compression is UnitTest
   """
@@ -427,7 +427,7 @@ class iso _TestProduceV1ApiLZ4Compression is UnitTest
   fun name(): String => "kafka/ProduceV1ApiLZ4Compression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaLZ4TopicCompression, _KafkaProduceV1)
+    _RunProduceApiTest(h, KafkaLZ4TopicCompression, _KafkaProduceV1)?
 
 class iso _TestProduceV1ApiSnappyCompression is UnitTest
   """
@@ -436,7 +436,7 @@ class iso _TestProduceV1ApiSnappyCompression is UnitTest
   fun name(): String => "kafka/ProduceV1ApiSnappyCompression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaSnappyTopicCompression, _KafkaProduceV1)
+    _RunProduceApiTest(h, KafkaSnappyTopicCompression, _KafkaProduceV1)?
 
 class iso _TestProduceV2ApiNoCompression is UnitTest
   """
@@ -445,7 +445,7 @@ class iso _TestProduceV2ApiNoCompression is UnitTest
   fun name(): String => "kafka/ProduceV2ApiNoCompression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaNoTopicCompression, _KafkaProduceV2)
+    _RunProduceApiTest(h, KafkaNoTopicCompression, _KafkaProduceV2)?
 
 class iso _TestProduceV2ApiGzipCompression is UnitTest
   """
@@ -454,7 +454,7 @@ class iso _TestProduceV2ApiGzipCompression is UnitTest
   fun name(): String => "kafka/ProduceV2ApiGzipCompression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaGzipTopicCompression, _KafkaProduceV2)
+    _RunProduceApiTest(h, KafkaGzipTopicCompression, _KafkaProduceV2)?
 
 class iso _TestProduceV2ApiLZ4Compression is UnitTest
   """
@@ -463,7 +463,7 @@ class iso _TestProduceV2ApiLZ4Compression is UnitTest
   fun name(): String => "kafka/ProduceV2ApiLZ4Compression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaLZ4TopicCompression, _KafkaProduceV2)
+    _RunProduceApiTest(h, KafkaLZ4TopicCompression, _KafkaProduceV2)?
 
 class iso _TestProduceV2ApiSnappyCompression is UnitTest
   """
@@ -472,7 +472,7 @@ class iso _TestProduceV2ApiSnappyCompression is UnitTest
   fun name(): String => "kafka/ProduceV2ApiSnappyCompression"
 
   fun apply(h: TestHelper) ? =>
-    _RunProduceApiTest(h, KafkaSnappyTopicCompression, _KafkaProduceV2)
+    _RunProduceApiTest(h, KafkaSnappyTopicCompression, _KafkaProduceV2)?
 
 class iso _TestProduceV0ApiSplitLargeRequest is UnitTest
   """
@@ -481,7 +481,7 @@ class iso _TestProduceV0ApiSplitLargeRequest is UnitTest
   fun name(): String => "kafka/ProduceV0ApiSplitLargeRequest"
 
   fun apply(h: TestHelper) ? =>
-    _ProduceApiCombineSplitTest(h, _KafkaProduceV0)
+    _ProduceApiCombineSplitTest(h, _KafkaProduceV0)?
 
 class iso _TestProduceV1ApiSplitLargeRequest is UnitTest
   """
@@ -490,7 +490,7 @@ class iso _TestProduceV1ApiSplitLargeRequest is UnitTest
   fun name(): String => "kafka/ProduceV1ApiSplitLargeRequest"
 
   fun apply(h: TestHelper) ? =>
-    _ProduceApiCombineSplitTest(h, _KafkaProduceV1)
+    _ProduceApiCombineSplitTest(h, _KafkaProduceV1)?
 
 class iso _TestProduceV2ApiSplitLargeRequest is UnitTest
   """
@@ -499,7 +499,7 @@ class iso _TestProduceV2ApiSplitLargeRequest is UnitTest
   fun name(): String => "kafka/ProduceV2ApiSplitLargeRequest"
 
   fun apply(h: TestHelper) ? =>
-    _ProduceApiCombineSplitTest(h, _KafkaProduceV2)
+    _ProduceApiCombineSplitTest(h, _KafkaProduceV2)?
 
 class iso _TestOffsetsV0Api is UnitTest
   """
@@ -508,7 +508,7 @@ class iso _TestOffsetsV0Api is UnitTest
   fun name(): String => "kafka/OffsetsV0"
 
   fun apply(h: TestHelper) ? =>
-    _RunOffsetsApiTest(h, _KafkaOffsetsV0)
+    _RunOffsetsApiTest(h, _KafkaOffsetsV0)?
 
 class iso _TestOffsetsV1Api is UnitTest
   """
@@ -517,7 +517,7 @@ class iso _TestOffsetsV1Api is UnitTest
   fun name(): String => "kafka/OffsetsV1"
 
   fun apply(h: TestHelper) ? =>
-    _RunOffsetsApiTest(h, _KafkaOffsetsV1)
+    _RunOffsetsApiTest(h, _KafkaOffsetsV1)?
 
 primitive _ProduceApiCombineSplitTest
   """
@@ -582,14 +582,14 @@ primitive _ProduceApiCombineSplitTest
       val]]]))
 
 
-    let msgs = DataGen.generate_random_data(topic, 10, 100)
-    let msgs2 = DataGen.generate_random_data(topic, 10, 100)
-    let msgs3 = DataGen.generate_random_data(topic, 1000, 100)
-    let msgs4 = DataGen.generate_random_data(topic, 10, 100)
-    let msgs5 = DataGen.generate_random_data(topic2, 10, 100)
-    let msgs6 = DataGen.generate_random_data(topic2, 10, 100)
-    let msgs7 = DataGen.generate_random_data(topic2, 1000, 100)
-    let msgs8 = DataGen.generate_random_data(topic2, 10, 100)
+    let msgs = DataGen.generate_random_data(topic, 10, 100)?
+    let msgs2 = DataGen.generate_random_data(topic, 10, 100)?
+    let msgs3 = DataGen.generate_random_data(topic, 1000, 100)?
+    let msgs4 = DataGen.generate_random_data(topic, 10, 100)?
+    let msgs5 = DataGen.generate_random_data(topic2, 10, 100)?
+    let msgs6 = DataGen.generate_random_data(topic2, 10, 100)?
+    let msgs7 = DataGen.generate_random_data(topic2, 1000, 100)?
+    let msgs8 = DataGen.generate_random_data(topic2, 10, 100)?
 
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
       msgs5, state.topics_state)
@@ -601,7 +601,7 @@ primitive _ProduceApiCombineSplitTest
       msgs8, state.topics_state)
 
     h.assert_eq[USize](pending_buffer.size(), 1)
-    (let size, let num, _) = pending_buffer(0)
+    (let size, let num, _) = pending_buffer(0)?
     h.assert_eq[U64](num, 0)
 
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic,
@@ -625,7 +625,7 @@ primitive _ProduceApiCombineSplitTest
     h.assert_eq[USize](pending_buffer.size(), 4)
     while pending_buffer.size() > 0 do
       try
-        (let s, let n, let m) = pending_buffer.shift()
+        (let s, let n, let m) = pending_buffer.shift()?
         h.assert_true(s < 32768)
         let produce_request: Array[ByteSeq] val = api_to_use.encode_request(9,
           conf, consume m)
@@ -671,7 +671,7 @@ primitive _ProduceApiCombineSplitTest
     h.assert_eq[USize](pending_buffer.size(), 4)
     while pending_buffer.size() > 0 do
       try
-        (let s, let n, let m) = pending_buffer.shift()
+        (let s, let n, let m) = pending_buffer.shift()?
         h.assert_true(s < 32768)
         let produce_request: Array[ByteSeq] val = api_to_use.encode_request(9,
           conf, consume m)
@@ -717,7 +717,7 @@ primitive _ProduceApiCombineSplitTest
     h.assert_eq[USize](pending_buffer.size(), 4)
     while pending_buffer.size() > 0 do
       try
-        (let s, let n, let m) = pending_buffer.shift()
+        (let s, let n, let m) = pending_buffer.shift()?
         h.assert_true(s < 32768)
         let produce_request: Array[ByteSeq] val = api_to_use.encode_request(9,
           conf, consume m)
@@ -749,7 +749,7 @@ primitive KeyComparator
     let a' = a as Array[U8] val
     let b' = b as Array[U8] val
 
-    ByteSeqComparator.eq(a', b')
+    ByteSeqComparator.eq(a', b')?
 
 primitive ByteSeqComparator
   fun eq(a: ByteSeq, b: ByteSeq): Bool ? =>
@@ -758,7 +758,7 @@ primitive ByteSeqComparator
     end
 
     for i in Range[USize](0, a.size()) do
-      if a(i) != b(i) then
+      if a(i)? != b(i)? then
         return false
       end
     end
@@ -772,7 +772,7 @@ primitive ArrayComparator[A: (Equatable[A] #read & Stringable #read)]
     end
 
     for (i, v) in a.pairs() do
-      if v != b(i) then
+      if v != b(i)? then
         return false
       end
     end

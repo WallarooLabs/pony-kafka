@@ -31,36 +31,36 @@ type SnappyStatus is I32
 
 primitive SnappyCompressor
   fun compress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
-    Snappy.compress(logger, data)
+    Snappy.compress(logger, data)?
 
   fun compress_array(logger: Logger[String], data: Array[ByteSeq] val,
     total_size: USize): Array[U8] iso ?
   =>
-    Snappy.compress_array(logger, data, total_size)
+    Snappy.compress_array(logger, data, total_size)?
 
   fun compress_java(logger: Logger[String], data: ByteSeq,
     block_size: USize = 32*1024): Array[U8] iso ?
   =>
-    Snappy.compress_java(logger, data, block_size)
+    Snappy.compress_java(logger, data, block_size)?
 
   fun compress_array_java(logger: Logger[String], data: Array[ByteSeq] val,
     total_size: USize, block_size: USize = 32*1024): Array[U8] iso ?
   =>
-    Snappy.compress_array_java(logger, data, total_size, block_size)
+    Snappy.compress_array_java(logger, data, total_size, block_size)?
 
 primitive SnappyDecompressor
   fun decompress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
-    Snappy.decompress(logger, data)
+    Snappy.decompress(logger, data)?
 
   fun decompress_java(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
-    Snappy.decompress_java(logger, data)
+    Snappy.decompress_java(logger, data)?
 
 primitive Snappy
   fun read32be(buffer: ByteSeq, offset: USize): U32 ? =>
     // TODO: figure out some way of detecting endianness; big endian needs byte
     // swapping
-    (buffer(offset + 0).u32() << 24) or (buffer(offset + 1).u32() << 16) or
-    (buffer(offset + 2).u32() << 8) or buffer(offset + 3).u32()
+    (buffer(offset + 0)?.u32() << 24) or (buffer(offset + 1)?.u32() << 16) or
+    (buffer(offset + 2)?.u32() << 8) or buffer(offset + 3)?.u32()
 
   fun decompress_java(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
     let snappy_java_hdr_size: USize = 16
@@ -70,20 +70,20 @@ primitive Snappy
     if data.size() <= (snappy_java_hdr_size + 4) then
       logger(Info) and logger.log(Info, "Not snappy java compressed data " +
         "(not enough data). Falling back to normal snappy decompression.")
-      return decompress(logger, data)
+      return decompress(logger, data)?
     end
 
-    if not ((data(0) == snappy_java_magic(0))
-      and (data(1) == snappy_java_magic(1))
-      and (data(2) == snappy_java_magic(2))
-      and (data(3) == snappy_java_magic(3))
-      and (data(4) == snappy_java_magic(4))
-      and (data(5) == snappy_java_magic(5))
-      and (data(6) == snappy_java_magic(6))
-      and (data(7) == snappy_java_magic(7))) then
+    if not ((data(0)? == snappy_java_magic(0)?)
+      and (data(1)? == snappy_java_magic(1)?)
+      and (data(2)? == snappy_java_magic(2)?)
+      and (data(3)? == snappy_java_magic(3)?)
+      and (data(4)? == snappy_java_magic(4)?)
+      and (data(5)? == snappy_java_magic(5)?)
+      and (data(6)? == snappy_java_magic(6)?)
+      and (data(7)? == snappy_java_magic(7)?)) then
       logger(Info) and logger.log(Info, "Not snappy java compressed data " +
         "(invalid magic). Falling back to normal snappy decompression.")
-      return decompress(logger, data)
+      return decompress(logger, data)?
     end
 
     var offset: USize = snappy_java_hdr_size
@@ -92,7 +92,7 @@ primitive Snappy
 
     while (offset + 4) < data.size() do
       var uncompressed_size: USize = 0
-      var chunk_size = read32be(data, offset).usize()
+      var chunk_size = read32be(data, offset)?.usize()
       offset = offset + 4
 
       if (chunk_size + offset) > data.size() then
@@ -134,7 +134,7 @@ primitive Snappy
 
     while (offset + 4) < data.size() do
       var uncompressed_size: USize = 0
-      var chunk_size = read32be(data, offset).usize()
+      var chunk_size = read32be(data, offset)?.usize()
       if (chunk_size + offset) > data.size() then
         logger(Error) and logger.log(Error,
           "Snappy Java deconding error! Invalid chunk length encountered.")
@@ -237,7 +237,7 @@ primitive Snappy
         a
       end
 
-    compress(logger, consume arr)
+    compress(logger, consume arr)?
 
   fun compress_java(logger: Logger[String], data: ByteSeq,
     block_size: USize = 32*1024): Array[U8] iso ?
@@ -254,22 +254,22 @@ primitive Snappy
     var offset: USize = 0
 
     // write header
-    buffer(0) = snappy_java_magic(0)
-    buffer(1) = snappy_java_magic(1)
-    buffer(2) = snappy_java_magic(2)
-    buffer(3) = snappy_java_magic(3)
-    buffer(4) = snappy_java_magic(4)
-    buffer(5) = snappy_java_magic(5)
-    buffer(6) = snappy_java_magic(6)
-    buffer(7) = snappy_java_magic(7)
-    buffer(8) = 0
-    buffer(9) = 0
-    buffer(10) = 0
-    buffer(11) = 1
-    buffer(12) = 0
-    buffer(13) = 0
-    buffer(14) = 0
-    buffer(15) = 1
+    buffer(0)? = snappy_java_magic(0)?
+    buffer(1)? = snappy_java_magic(1)?
+    buffer(2)? = snappy_java_magic(2)?
+    buffer(3)? = snappy_java_magic(3)?
+    buffer(4)? = snappy_java_magic(4)?
+    buffer(5)? = snappy_java_magic(5)?
+    buffer(6)? = snappy_java_magic(6)?
+    buffer(7)? = snappy_java_magic(7)?
+    buffer(8)? = 0
+    buffer(9)? = 0
+    buffer(10)? = 0
+    buffer(11)? = 1
+    buffer(12)? = 0
+    buffer(13)? = 0
+    buffer(14)? = 0
+    buffer(15)? = 1
 
     total_compressed_size = 16
     offset = 0
@@ -294,10 +294,10 @@ primitive Snappy
       end
 
       // write chunk size (big endian)
-      buffer(total_compressed_size + 0) = (out_len >> 24).u8()
-      buffer(total_compressed_size + 1) = (out_len >> 16).u8()
-      buffer(total_compressed_size + 2) = (out_len >> 8).u8()
-      buffer(total_compressed_size + 3) = (out_len >> 0).u8()
+      buffer(total_compressed_size + 0)? = (out_len >> 24).u8()
+      buffer(total_compressed_size + 1)? = (out_len >> 16).u8()
+      buffer(total_compressed_size + 2)? = (out_len >> 8).u8()
+      buffer(total_compressed_size + 3)? = (out_len >> 0).u8()
 
       total_compressed_size = total_compressed_size + out_len + 4
       offset = offset + d.size()
@@ -327,5 +327,5 @@ primitive Snappy
         a
       end
 
-    compress_java(logger, consume arr, block_size)
+    compress_java(logger, consume arr, block_size)?
 

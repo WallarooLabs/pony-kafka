@@ -102,19 +102,19 @@ primitive LZ4Compressor
     copts: LZ4FCompressOptions = LZ4FCompressOptions): Array[U8] iso ?
   =>
     LZ4.compress_array(logger, recover val [data] end, data.size(), prefs,
-      copts)
+      copts)?
 
   fun compress_array(logger: Logger[String], data: Array[ByteSeq] val,
     total_size: USize, prefs: LZ4FPreferences = LZ4FPreferences,
     copts: LZ4FCompressOptions = LZ4FCompressOptions): Array[U8] iso ?
   =>
-    LZ4.compress_array(logger, data, total_size, prefs, copts)
+    LZ4.compress_array(logger, data, total_size, prefs, copts)?
 
 primitive LZ4Decompressor
   fun decompress(logger: Logger[String], data: ByteSeq,
     dopts: LZ4FDecompressOptions = LZ4FDecompressOptions): Array[U8] iso ?
   =>
-    LZ4.decompress(logger, data, dopts)
+    LZ4.decompress(logger, data, dopts)?
 
 primitive LZ4
 // based on https://github.com/edenhill/librdkafka/blob/master/src/rdkafka_lz4.c
@@ -219,7 +219,7 @@ primitive LZ4
     prefs: LZ4FPreferences = LZ4FPreferences,
     copts: LZ4FCompressOptions = LZ4FCompressOptions): Array[U8] iso ?
   =>
-    compress_array(logger, recover val [data] end, data.size(), prefs, copts)
+    compress_array(logger, recover val [data] end, data.size(), prefs, copts)?
 
   // TODO: Figure out appropriate way to hide Structs in MaybePointers that
   // isn't exposed to users

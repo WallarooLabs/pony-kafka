@@ -224,7 +224,7 @@ class Writer
 
   fun ref _byte(data: U8) =>
     try
-      _current(_offset) = data
+      _current(_offset)? = data
       _offset = _offset + 1
       _size = _size + 1
     end

@@ -197,19 +197,19 @@ primitive Crc32
 
 primitive ZlibCompressor
   fun compress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
-    let zlib = Zlib.compressor(logger where window_bits = 15+16)
-    zlib.compress_array(recover val [data] end, data.size())
+    let zlib = Zlib.compressor(logger where window_bits = 15+16)?
+    zlib.compress_array(recover val [data] end, data.size())?
 
   fun compress_array(logger: Logger[String], data: Array[ByteSeq] val,
     total_size: USize): Array[U8] iso ?
   =>
-    let zlib = Zlib.compressor(logger where window_bits = 15+16)
-    zlib.compress_array(data, total_size)
+    let zlib = Zlib.compressor(logger where window_bits = 15+16)?
+    zlib.compress_array(data, total_size)?
 
 primitive ZlibDecompressor
   fun decompress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
     let zlib = Zlib.decompressor(logger where window_bits = 15+32)
-    zlib.decompress(data)
+    zlib.decompress(data)?
 
 class Zlib
   var _stream: _ZStream = _ZStream
@@ -231,7 +231,7 @@ class Zlib
       strategy, zlib_version.cstring(), _stream.struct_size_bytes())
 
     if err != ZOk() then
-      _check_error(err)
+      _check_error(err)?
     end
 
   new ref decompressor(logger: Logger[String], window_bits: I32 = 15) =>
@@ -293,7 +293,7 @@ class Zlib
     Array[U8] iso ?
   =>
     let buffer_size = match decompressed_size
-    | None => calculate_decompressed_size(data)
+    | None => calculate_decompressed_size(data)?
     | let x: USize => x
     else
       error // should never happen
@@ -308,7 +308,7 @@ class Zlib
       _stream.struct_size_bytes())
 
     if err != ZOk() then
-      _check_error(err)
+      _check_error(err)?
     end
 
     let buffer = recover Array[U8](buffer_size) end
@@ -320,7 +320,7 @@ class Zlib
     err = @inflateGetHeader(_stream_p, hdr_p)
     try
       if err != ZOk() then
-        _check_error(err)
+        _check_error(err)?
       end
     else
       // clean up zlib internal state and end deflate stream
@@ -334,7 +334,7 @@ class Zlib
     err = @inflate(_stream_p, ZFinish())
     try
       if err != ZStreamEnd() then
-        _check_error(err)
+        _check_error(err)?
       end
       if _stream.avail_in != 0 then
         _logger(Error) and _logger.log(Error,
@@ -364,7 +364,7 @@ class Zlib
       _stream.struct_size_bytes())
 
     if err != ZOk() then
-      _check_error(err)
+      _check_error(err)?
     end
 
     let buffer_size: USize = 512
@@ -379,7 +379,7 @@ class Zlib
     err = @inflateGetHeader(_stream_p, hdr_p)
     try
       if err != ZOk() then
-        _check_error(err)
+        _check_error(err)?
       end
     else
       // clean up zlib internal state and end deflate stream
@@ -398,7 +398,7 @@ class Zlib
       try
         if (err != ZOk()) and (err != ZStreamEnd()) and
           (err != ZBufError()) then
-          _check_error(err)
+          _check_error(err)?
         end
       else
         // clean up zlib internal state and end deflate stream
@@ -419,7 +419,7 @@ class Zlib
   // based on
   // https://github.com/edenhill/librdkafka/blob/master/src/rdkafka_msgset_writer.c#L723
   fun ref compress(data: ByteSeq): Array[U8] iso ? =>
-    compress_array(recover val [data] end, data.size())
+    compress_array(recover val [data] end, data.size())?
 
   fun ref compress_array(data: Array[ByteSeq] val, total_size: USize):
     Array[U8] iso ?
@@ -436,7 +436,7 @@ class Zlib
       let err = @deflate(_stream_p, ZNoFlush())
       try
         if err != ZOk() then
-          _check_error(err)
+          _check_error(err)?
         end
 
         if _stream.avail_in != 0 then
@@ -454,7 +454,7 @@ class Zlib
     let err = @deflate(_stream_p, ZFinish())
     try
       if err != ZStreamEnd() then
-        _check_error(err)
+        _check_error(err)?
       end
     else
       // clean up zlib internal state and end deflate stream

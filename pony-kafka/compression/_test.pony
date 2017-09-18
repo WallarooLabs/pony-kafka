@@ -37,14 +37,14 @@ class iso _TestXXHash is UnitTest
   fun apply(h: TestHelper) ? =>
     let d = [as U8: 1; 2; 6; 10; 42; 'H'; 'e'; 'l'; 'l'; 'o'; ','; ' '; 'w'
       'o'; 'r'; 'l'; 'd'; '!'; 0; 2; 56; 99]
-    h.assert_eq[U32](0x02cc5d05, XXHash.hash32(Array[U8], 0) as U32)
-    h.assert_eq[U32](0xe0fe705f, XXHash.hash32([as U8: 42], 0) as U32)
+    h.assert_eq[U32](0x02cc5d05, XXHash.hash32(Array[U8], 0)? as U32)
+    h.assert_eq[U32](0xe0fe705f, XXHash.hash32([as U8: 42], 0)? as U32)
     h.assert_eq[U32](0x9e5e7e93, XXHash.hash32([as U8: 'H'; 'e'; 'l'; 'l'; 'o'
-      ','; ' '; 'w'; 'o'; 'r'; 'l'; 'd'; '!'; 0], 0) as U32)
-    h.assert_eq[U32](0xd6bf8459, XXHash.hash32(Array[U8], 0x42c91977) as U32)
-    h.assert_eq[U32](0x02cc5d05, XXHash.hash32(d, 0, 4, 0) as U32)
-    h.assert_eq[U32](0xe0fe705f, XXHash.hash32(d, 0, 4, 1) as U32)
-    h.assert_eq[U32](0x9e5e7e93, XXHash.hash32(d, 0, 5, 14) as U32)
+      ','; ' '; 'w'; 'o'; 'r'; 'l'; 'd'; '!'; 0], 0)? as U32)
+    h.assert_eq[U32](0xd6bf8459, XXHash.hash32(Array[U8], 0x42c91977)? as U32)
+    h.assert_eq[U32](0x02cc5d05, XXHash.hash32(d, 0, 4, 0)? as U32)
+    h.assert_eq[U32](0xe0fe705f, XXHash.hash32(d, 0, 4, 1)? as U32)
+    h.assert_eq[U32](0x9e5e7e93, XXHash.hash32(d, 0, 5, 14)? as U32)
 
 class iso _TestZlib is UnitTest
   """
@@ -59,15 +59,15 @@ class iso _TestZlib is UnitTest
 
     let logger = StringLogger(Warn, h.env.out)
 
-    let compressed_data = ZlibCompressor.compress(logger, b')
+    let compressed_data = ZlibCompressor.compress(logger, b')?
 
-    let a = ZlibDecompressor.decompress(logger, consume val compressed_data)
+    let a = ZlibDecompressor.decompress(logger, consume val compressed_data)?
     let a': Array[U8] val = consume val a
 
     h.assert_eq[USize](b'.size(), a'.size())
 
     for (i, v) in b'.pairs() do
-      h.assert_eq[U8](v, a'(i))
+      h.assert_eq[U8](v, a'(i)?)
     end
 
 class iso _TestLZ4 is UnitTest
@@ -83,15 +83,15 @@ class iso _TestLZ4 is UnitTest
 
     let logger = StringLogger(Warn, h.env.out)
 
-    let compressed_data = LZ4Compressor.compress(logger, b')
+    let compressed_data = LZ4Compressor.compress(logger, b')?
 
-    let a = LZ4Decompressor.decompress(logger, consume val compressed_data)
+    let a = LZ4Decompressor.decompress(logger, consume val compressed_data)?
     let a': Array[U8] val = consume val a
 
     h.assert_eq[USize](b'.size(), a'.size())
 
     for (i, v) in b'.pairs() do
-      h.assert_eq[U8](v, a'(i))
+      h.assert_eq[U8](v, a'(i)?)
     end
 
 class iso _TestSnappy is UnitTest
@@ -107,26 +107,26 @@ class iso _TestSnappy is UnitTest
 
     let logger = StringLogger(Warn, h.env.out)
 
-    let compressed_data = SnappyCompressor.compress(logger, b')
+    let compressed_data = SnappyCompressor.compress(logger, b')?
 
-    let a = SnappyDecompressor.decompress(logger, consume val compressed_data)
+    let a = SnappyDecompressor.decompress(logger, consume val compressed_data)?
     let a': Array[U8] val = consume val a
 
     h.assert_eq[USize](b'.size(), a'.size())
 
     for (i, v) in b'.pairs() do
-      h.assert_eq[U8](v, a'(i))
+      h.assert_eq[U8](v, a'(i)?)
     end
 
-    let compressed_data' = SnappyCompressor.compress_java(logger, b')
+    let compressed_data' = SnappyCompressor.compress_java(logger, b')?
 
     let z = SnappyDecompressor.decompress_java(logger,
-      consume val compressed_data')
+      consume val compressed_data')?
     let z': Array[U8] val = consume val z
 
     h.assert_eq[USize](b'.size(), z'.size())
 
     for (i, v) in b'.pairs() do
-      h.assert_eq[U8](v, z'(i))
+      h.assert_eq[U8](v, z'(i)?)
     end
 
