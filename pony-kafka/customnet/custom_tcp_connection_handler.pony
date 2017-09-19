@@ -156,17 +156,10 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     notify = consume notify'
     _connect_count = 0
     _fd = fd
-    ifdef linux then
-      _event = @pony_asio_event_create(conn, fd,
-        AsioEvent.read_write_oneshot(), 0, true, true)
-    else
-      _event = @pony_asio_event_create(conn, fd,
-        AsioEvent.read_write(), 0, true, false)
-    end
+    _event = @pony_asio_event_create(conn, fd,
+      AsioEvent.read_write_oneshot(), 0, true, true)
     _connected = true
-    ifdef linux then
-      @pony_asio_event_set_writeable[None](_event, true)
-    end
+    @pony_asio_event_set_writeable[None](_event, true)
     _writeable = true
     _read_buf = recover Array[U8].>undefined(init_size) end
     _next_size = init_size
@@ -661,15 +654,11 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
           match len
           | 0 =>
             // Would block, try again later.
-            ifdef linux then
-              // this is safe because asio thread isn't currently subscribed
-              // for a read event so will not be writing to the readable flag
-              @pony_asio_event_set_readable[None](_event, false)
-              _readable = false
-              @pony_asio_event_resubscribe_read(_event)
-            else
-              _readable = false
-            end
+            // this is safe because asio thread isn't currently subscribed
+            // for a read event so will not be writing to the readable flag
+            @pony_asio_event_set_readable[None](_event, false)
+            _readable = false
+            @pony_asio_event_resubscribe_read(_event)
             return
           | _next_size =>
             // Increase the read buffer size.
@@ -800,10 +789,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       _pending_writev_total = 0
       _readable = false
       _writeable = false
-      ifdef linux then
-        @pony_asio_event_set_readable[None](_event, false)
-        @pony_asio_event_set_writeable[None](_event, false)
-      end
+      @pony_asio_event_set_readable[None](_event, false)
+      @pony_asio_event_set_writeable[None](_event, false)
     end
 
     // On windows, this will also cancel all outstanding IOCP operations.
@@ -819,12 +806,10 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   fun ref _apply_backpressure() =>
     ifdef not windows then
       _writeable = false
-      ifdef linux then
-        // this is safe because asio thread isn't currently subscribed
-        // for a write event so will not be writing to the readable flag
-        @pony_asio_event_set_writeable[None](_event, false)
-        @pony_asio_event_resubscribe_write(_event)
-      end
+      // this is safe because asio thread isn't currently subscribed
+      // for a write event so will not be writing to the readable flag
+      @pony_asio_event_set_writeable[None](_event, false)
+      @pony_asio_event_resubscribe_write(_event)
     end
 
     notify.throttled(_conn)
