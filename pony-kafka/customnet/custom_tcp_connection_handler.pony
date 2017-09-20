@@ -31,7 +31,7 @@ use "collections"
 use "net"
 
 use @pony_asio_event_create[AsioEventID](owner: AsioEventNotify, fd: U32,
-  flags: U32, nsec: U64, noisy: Bool, auto_resub: Bool)
+  flags: U32, nsec: U64, noisy: Bool)
 use @pony_asio_event_fd[U32](event: AsioEventID)
 use @pony_asio_event_unsubscribe[None](event: AsioEventID)
 use @pony_asio_event_resubscribe_read[None](event: AsioEventID)
@@ -157,7 +157,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     _connect_count = 0
     _fd = fd
     _event = @pony_asio_event_create(conn, fd,
-      AsioEvent.read_write_oneshot(), 0, true, true)
+      AsioEvent.read_write_oneshot(), 0, true)
     _connected = true
     @pony_asio_event_set_writeable[None](_event, true)
     _writeable = true
