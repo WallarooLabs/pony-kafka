@@ -10,7 +10,7 @@ The main reason this exists is because the alternatives weren't necessarily goin
 
 # Building
 
-You currently need the latest Wallaroo Labs version of Pony (https://github.com/WallarooLabs/ponyc). Mainline Pony compatibility is already planned for the near future.
+You need [ponyc](https://github.com/ponylang/ponyc) to compile `pony-kafka`. This is currently tested with `ponyc` version 0.19.2.
 
 You also need the following (in addition to what is needed for Pony itself):
 
