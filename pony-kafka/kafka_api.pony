@@ -583,7 +583,7 @@ primitive _KafkaMessageSetCodecV0V1
           let msg: ProducerKafkaMessage val = recover
             ProducerKafkaMessage(producer, None, compressed_data,
             compressed_data.size() where timestamp = timestamp) end
-          encode_message(wb_msgs, msg, -1, version, KafkaGzipTopicCompression)
+          encode_message(wb_msgs, msg, 0, version, KafkaGzipTopicCompression)
         else
           logger(Error) and logger.log(Error, "Error compressing messages " +
             "using GZip. Falling back to uncompressed messages.")
@@ -622,7 +622,7 @@ primitive _KafkaMessageSetCodecV0V1
           let msg: ProducerKafkaMessage val = recover
             ProducerKafkaMessage(producer, None, compressed_data,
             compressed_data.size() where timestamp = timestamp) end
-          encode_message(wb_msgs, msg, -1, version, KafkaSnappyTopicCompression)
+          encode_message(wb_msgs, msg, 0, version, KafkaSnappyTopicCompression)
         else
           logger(Error) and logger.log(Error, "Error compressing messages " +
             "using Snappy. Falling back to uncompressed messages.")
@@ -665,7 +665,7 @@ primitive _KafkaMessageSetCodecV0V1
           let msg: ProducerKafkaMessage val = recover
             ProducerKafkaMessage(producer, None, compressed_data',
             compressed_data'.size() where timestamp = timestamp) end
-          encode_message(wb_msgs, msg, -1, version, KafkaLZ4TopicCompression)
+          encode_message(wb_msgs, msg, 0, version, KafkaLZ4TopicCompression)
         else
           logger(Error) and logger.log(Error, "Error compressing messages " +
             "using LZ4. Falling back to uncompressed messages.")
