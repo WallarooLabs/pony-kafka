@@ -105,75 +105,75 @@ primitive VarIntDecoder
 
     d
 
-  fun peek_u8(rb: Reader, offset: USize = 0): (U8, USize) ? =>
+  fun peek_u8(rb: PeekableReader, offset: USize = 0): (U8, USize) ? =>
     """
     Read a byte from the buffer in base 128 varint encoding.
     """
     (let x, let num_bytes) = _peek_varint(rb, 8, offset)?
     (x.u8(), num_bytes)
 
-  fun peek_i8(rb: Reader, offset: USize = 0): (I8, USize) ? =>
+  fun peek_i8(rb: PeekableReader, offset: USize = 0): (I8, USize) ? =>
     """
     Read a byte from the buffer in base 128 varint encoding.
     """
     (let x, let num_bytes) = _peek_svarint(rb, 8, offset)?
     (x.i8(), num_bytes)
 
-  fun peek_bool(rb: Reader, offset: USize = 0): (Bool, USize) ? =>
+  fun peek_bool(rb: PeekableReader, offset: USize = 0): (Bool, USize) ? =>
     """
     Read a Bool from the buffer in base 128 varint encoding.
     """
     (let x, let num_bytes) = _peek_varint(rb, 8, offset)?
     (BoolConverter.u8_to_bool(x.u8()), num_bytes)
 
-  fun peek_u16(rb: Reader, offset: USize = 0): (U16, USize) ? =>
+  fun peek_u16(rb: PeekableReader, offset: USize = 0): (U16, USize) ? =>
     """
     Read a U16 from the buffer in base 128 varint encoding.
     """
     (let x, let num_bytes) = _peek_varint(rb, 16, offset)?
     (x.u16(), num_bytes)
 
-  fun peek_i16(rb: Reader, offset: USize = 0): (I16, USize) ? =>
+  fun peek_i16(rb: PeekableReader, offset: USize = 0): (I16, USize) ? =>
     """
     Read an I16 from the buffer in zig zag base 128 varint encoding.
     """
     (let x, let num_bytes) = _peek_svarint(rb, 16, offset)?
     (x.i16(), num_bytes)
 
-  fun peek_u32(rb: Reader, offset: USize = 0): (U32, USize) ? =>
+  fun peek_u32(rb: PeekableReader, offset: USize = 0): (U32, USize) ? =>
     """
     Read a U32 from the buffer in base 128 varint encoding.
     """
     (let x, let num_bytes) = _peek_varint(rb, 32, offset)?
     (x.u32(), num_bytes)
 
-  fun peek_i32(rb: Reader, offset: USize = 0): (I32, USize) ? =>
+  fun peek_i32(rb: PeekableReader, offset: USize = 0): (I32, USize) ? =>
     """
     Read an I32 from the buffer in zig zag base 128 varint encoding.
     """
     (let x, let num_bytes) = _peek_svarint(rb, 32, offset)?
     (x.i32(), num_bytes)
 
-  fun peek_u64(rb: Reader, offset: USize = 0): (U64, USize) ? =>
+  fun peek_u64(rb: PeekableReader, offset: USize = 0): (U64, USize) ? =>
     """
     Read a U64 from the buffer in base 128 varint.
     """
     _peek_varint(rb, 64, offset)?
 
-  fun peek_i64(rb: Reader, offset: USize = 0): (I64, USize) ? =>
+  fun peek_i64(rb: PeekableReader, offset: USize = 0): (I64, USize) ? =>
     """
     Read an I64 from the buffer in zig zag base 128 varint encoding.
     """
     _peek_svarint(rb, 64, offset)?
 
-  fun _peek_svarint(rb: Reader, bits_to_read: U64, offset: USize = 0):
+  fun _peek_svarint(rb: PeekableReader, bits_to_read: U64, offset: USize = 0):
     (I64, USize) ?
   =>
     (let d', let num_bytes) = _peek_varint(rb, bits_to_read, offset)?
     let d = d'.i64()
     ((d >> 1) xor -(d and 1), num_bytes)
 
-  fun _peek_varint(rb: Reader, bits_to_read: U64, offset: USize = 0):
+  fun _peek_varint(rb: PeekableReader, bits_to_read: U64, offset: USize = 0):
     (U64, USize) ?
   =>
     var d: U64 = 0

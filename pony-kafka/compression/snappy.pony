@@ -30,29 +30,29 @@ use @snappy_compress[SnappyStatus](data: Pointer[U8] tag, size: USize,
 type SnappyStatus is I32
 
 primitive SnappyCompressor
-  fun compress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
+  fun compress(logger: Logger[String], data: ByteSeq): Array[U8] iso^ ? =>
     Snappy.compress(logger, data)?
 
   fun compress_array(logger: Logger[String], data: Array[ByteSeq] val,
-    total_size: USize): Array[U8] iso ?
+    total_size: USize): Array[U8] iso^ ?
   =>
     Snappy.compress_array(logger, data, total_size)?
 
   fun compress_java(logger: Logger[String], data: ByteSeq,
-    block_size: USize = 32*1024): Array[U8] iso ?
+    block_size: USize = 32*1024): Array[U8] iso^ ?
   =>
     Snappy.compress_java(logger, data, block_size)?
 
   fun compress_array_java(logger: Logger[String], data: Array[ByteSeq] val,
-    total_size: USize, block_size: USize = 32*1024): Array[U8] iso ?
+    total_size: USize, block_size: USize = 32*1024): Array[U8] iso^ ?
   =>
     Snappy.compress_array_java(logger, data, total_size, block_size)?
 
 primitive SnappyDecompressor
-  fun decompress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
+  fun decompress(logger: Logger[String], data: ByteSeq): Array[U8] iso^ ? =>
     Snappy.decompress(logger, data)?
 
-  fun decompress_java(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
+  fun decompress_java(logger: Logger[String], data: ByteSeq): Array[U8] iso^ ? =>
     Snappy.decompress_java(logger, data)?
 
 primitive Snappy
@@ -62,7 +62,7 @@ primitive Snappy
     (buffer(offset + 0)?.u32() << 24) or (buffer(offset + 1)?.u32() << 16) or
     (buffer(offset + 2)?.u32() << 8) or buffer(offset + 3)?.u32()
 
-  fun decompress_java(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
+  fun decompress_java(logger: Logger[String], data: ByteSeq): Array[U8] iso^ ? =>
     let snappy_java_hdr_size: USize = 16
     let snappy_java_magic = [as U8: 0x82; 'S'; 'N'; 'A'; 'P'; 'P'; 'Y'; 0]
 
@@ -180,7 +180,7 @@ primitive Snappy
 
     buffer
 
-  fun decompress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
+  fun decompress(logger: Logger[String], data: ByteSeq): Array[U8] iso^ ? =>
     var max_size: USize = 0
     var err = @snappy_uncompressed_length(data.cpointer().usize(), data.size(),
       addressof max_size)
@@ -206,7 +206,7 @@ primitive Snappy
 
     buffer
 
-  fun compress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
+  fun compress(logger: Logger[String], data: ByteSeq): Array[U8] iso^ ? =>
     let max_size = @snappy_max_compressed_length(data.size())
     let buffer = recover Array[U8](max_size) end
     buffer.undefined(buffer.space())
@@ -225,7 +225,7 @@ primitive Snappy
 
   // TODO: Figure out a way to do this without copying all the data into a
   // single buffer
-  fun compress_array(logger: Logger[String], data: Array[ByteSeq] val, total_size: USize): Array[U8] iso ? =>
+  fun compress_array(logger: Logger[String], data: Array[ByteSeq] val, total_size: USize): Array[U8] iso^ ? =>
     let arr = recover iso
         let a = Array[U8](total_size)
         for d in data.values() do
@@ -240,7 +240,7 @@ primitive Snappy
     compress(logger, consume arr)?
 
   fun compress_java(logger: Logger[String], data: ByteSeq,
-    block_size: USize = 32*1024): Array[U8] iso ?
+    block_size: USize = 32*1024): Array[U8] iso^ ?
   =>
     let snappy_java_hdr_size: USize = 16
     let snappy_java_magic = [as U8: 0x82; 'S'; 'N'; 'A'; 'P'; 'P'; 'Y'; 0]
@@ -312,7 +312,7 @@ primitive Snappy
   // TODO: Figure out a way to do this without copying all the data into a
   // single buffer
   fun compress_array_java(logger: Logger[String], data: Array[ByteSeq] val,
-    total_size: USize, block_size: USize = 32*1024): Array[U8] iso ?
+    total_size: USize, block_size: USize = 32*1024): Array[U8] iso^ ?
   =>
     let arr = recover iso
         let a = Array[U8](total_size)

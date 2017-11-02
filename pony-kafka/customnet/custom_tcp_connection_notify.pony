@@ -40,6 +40,14 @@ interface CustomTCPConnectionNotify
     """
     None
 
+  fun ref before_reconnecting(conn: CustomTCPConnection ref) =>
+    """
+    Called right before a reconnection attempt is made. The reconnection
+    attempt will cause either `connecting` or `connect_failed` to get called
+    as appropriate.
+    """
+    None
+
   fun ref connecting(conn: CustomTCPConnection ref, count: U32) =>
     """
     Called if name resolution succeeded for a TCPConnection and we are now

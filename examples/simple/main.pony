@@ -33,7 +33,7 @@ actor Main is KafkaClientManager
     let kconf =
       recover iso
         let kc = KafkaConfig(_logger, "My Client" where
-          use_java_compatible_snappy_compression' = false)
+          use_snappy_java_framing' = false)
         kc.add_broker("127.0.0.1", 9092)
 // uncomment for producer only config
 //        kc.add_topic_config("test")
@@ -90,19 +90,18 @@ actor C is KafkaConsumer
 
   // behavior kafka calls for each message received that should be sent to this
   // actor
-  be receive_kafka_message(msg: KafkaMessage val,
+  be receive_kafka_message(value: Array[U8] iso, key: (Array[U8] val | None), msg_metadata: KafkaMessageMetadata val,
     network_received_timestamp: U64)
   =>
     logger(Fine) and logger.log(Fine, "Received kafka message")
-    let m = String.from_array(msg.get_value())
+    let m = String.from_array(consume value)
 
     logger.log(Info, "CONSUMER(" + _name + ")-MSG(" + _i.string() +
-      "): Received Msg. topic: " + msg.get_topic() + ", partition: " +
-      msg.get_partition_id().string() + ", offset: " + msg.get_offset().string()
+      "): Received Msg. topic: " + msg_metadata.get_topic() + ", partition: " +
+      msg_metadata.get_partition_id().string() + ", offset: " + msg_metadata.get_offset().string()
       + ", value: " + m)
 
     _i = _i + 1
-    msg.send_consume_successful()
 
 
 // kafka producer actor
@@ -117,7 +116,7 @@ actor P is KafkaProducer
   new create(logger': Logger[String]) =>
     logger = logger'
 
-  fun ref update_producer_mapping(mapping: KafkaProducerMapping):
+  fun ref create_producer_mapping(mapping: KafkaProducerMapping):
     (KafkaProducerMapping | None)
   =>
     _kafka_producer_mapping = mapping

@@ -99,27 +99,27 @@ struct LZ4FPreferences
 primitive LZ4Compressor
   fun compress(logger: Logger[String], data: ByteSeq,
     prefs: LZ4FPreferences = LZ4FPreferences,
-    copts: LZ4FCompressOptions = LZ4FCompressOptions): Array[U8] iso ?
+    copts: LZ4FCompressOptions = LZ4FCompressOptions): Array[U8] iso^ ?
   =>
     LZ4.compress_array(logger, recover val [data] end, data.size(), prefs,
       copts)?
 
   fun compress_array(logger: Logger[String], data: Array[ByteSeq] val,
     total_size: USize, prefs: LZ4FPreferences = LZ4FPreferences,
-    copts: LZ4FCompressOptions = LZ4FCompressOptions): Array[U8] iso ?
+    copts: LZ4FCompressOptions = LZ4FCompressOptions): Array[U8] iso^ ?
   =>
     LZ4.compress_array(logger, data, total_size, prefs, copts)?
 
 primitive LZ4Decompressor
   fun decompress(logger: Logger[String], data: ByteSeq,
-    dopts: LZ4FDecompressOptions = LZ4FDecompressOptions): Array[U8] iso ?
+    dopts: LZ4FDecompressOptions = LZ4FDecompressOptions): Array[U8] iso^ ?
   =>
     LZ4.decompress(logger, data, dopts)?
 
 primitive LZ4
 // based on https://github.com/edenhill/librdkafka/blob/master/src/rdkafka_lz4.c
   fun decompress(logger: Logger[String], data: ByteSeq,
-    dopts: LZ4FDecompressOptions = LZ4FDecompressOptions): Array[U8] iso ?
+    dopts: LZ4FDecompressOptions = LZ4FDecompressOptions): Array[U8] iso^ ?
   =>
     var dctx: LZ4FDecompressionContext = LZ4FDecompressionContext
     var fi: LZ4FFrameInfo = LZ4FFrameInfo
@@ -217,7 +217,7 @@ primitive LZ4
 // based on https://github.com/edenhill/librdkafka/blob/master/src/rdkafka_lz4.c
   fun compress(logger: Logger[String], data: ByteSeq,
     prefs: LZ4FPreferences = LZ4FPreferences,
-    copts: LZ4FCompressOptions = LZ4FCompressOptions): Array[U8] iso ?
+    copts: LZ4FCompressOptions = LZ4FCompressOptions): Array[U8] iso^ ?
   =>
     compress_array(logger, recover val [data] end, data.size(), prefs, copts)?
 
@@ -227,7 +227,7 @@ primitive LZ4
   // https://github.com/edenhill/librdkafka/blob/master/src/rdkafka_lz4.c#L321
   fun compress_array(logger: Logger[String], data: Array[ByteSeq] val,
     total_size: USize, prefs: LZ4FPreferences = LZ4FPreferences,
-    copts: LZ4FCompressOptions = LZ4FCompressOptions): Array[U8] iso ?
+    copts: LZ4FCompressOptions = LZ4FCompressOptions): Array[U8] iso^ ?
   =>
     var bytes_written: USize = 0
     let max_len = @LZ4F_compressBound(total_size, Pointer[U8])

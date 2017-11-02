@@ -181,13 +181,13 @@ primitive ZVersionError
   fun apply(): I32 => -6
 
 primitive Crc32
-  fun crc32(data: ByteSeq): USize =>
+  fun crc32(data: ByteSeq box): USize =>
     @crc32(crc32_init(), data.cpointer(), data.size().u32())
 
   fun crc32_init(): USize =>
     @crc32(USize(0), Pointer[U8], U32(0))
 
-  fun crc32_array(data: Array[ByteSeq] val): USize =>
+  fun crc32_array(data: Array[ByteSeq] box): USize =>
     var crc = crc32_init()
     for d in data.values() do
       crc = @crc32(crc, d.cpointer(), d.size().u32())
@@ -196,18 +196,18 @@ primitive Crc32
     crc
 
 primitive ZlibCompressor
-  fun compress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
+  fun compress(logger: Logger[String], data: ByteSeq): Array[U8] iso^ ? =>
     let zlib = Zlib.compressor(logger where window_bits = 15+16)?
     zlib.compress_array(recover val [data] end, data.size())?
 
   fun compress_array(logger: Logger[String], data: Array[ByteSeq] val,
-    total_size: USize): Array[U8] iso ?
+    total_size: USize): Array[U8] iso^ ?
   =>
     let zlib = Zlib.compressor(logger where window_bits = 15+16)?
     zlib.compress_array(data, total_size)?
 
 primitive ZlibDecompressor
-  fun decompress(logger: Logger[String], data: ByteSeq): Array[U8] iso ? =>
+  fun decompress(logger: Logger[String], data: ByteSeq): Array[U8] iso^ ? =>
     let zlib = Zlib.decompressor(logger where window_bits = 15+32)
     zlib.decompress(data)?
 
@@ -290,7 +290,7 @@ class Zlib
 
   // based on https://github.com/edenhill/librdkafka/blob/master/src/rdgz.c
   fun ref decompress(data: ByteSeq, decompressed_size: (USize | None) = None):
-    Array[U8] iso ?
+    Array[U8] iso^ ?
   =>
     let buffer_size = match decompressed_size
     | None => calculate_decompressed_size(data)?
@@ -416,11 +416,11 @@ class Zlib
 
   // based on
   // https://github.com/edenhill/librdkafka/blob/master/src/rdkafka_msgset_writer.c#L723
-  fun ref compress(data: ByteSeq): Array[U8] iso ? =>
+  fun ref compress(data: ByteSeq): Array[U8] iso^ ? =>
     compress_array(recover val [data] end, data.size())?
 
   fun ref compress_array(data: Array[ByteSeq] val, total_size: USize):
-    Array[U8] iso ?
+    Array[U8] iso^ ?
   =>
     let max_len = @deflateBound(_stream_p, total_size.ulong()).u32()
     let buffer = recover Array[U8](max_len.usize()) end

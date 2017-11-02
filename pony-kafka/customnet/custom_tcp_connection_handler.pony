@@ -710,6 +710,13 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       _hard_close()
     end
 
+  fun ref _notify_reconnecting() =>
+    """
+    Inform the notifier that we're reconnecting.
+    """
+    notify.before_reconnecting(_conn)
+    _notify_connecting()
+
   fun ref close() =>
     """
     Attempt to perform a graceful shutdown. Don't accept new writes. If the
@@ -818,7 +825,9 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     notify.unthrottled(_conn)
 
   fun ref reconnect() =>
-    _connect_count = @pony_os_connect_tcp[U32](this,
-      _host.cstring(), _service.cstring(),
-      _from.cstring())
-    _notify_connecting()
+    if not _connected then
+      _connect_count = @pony_os_connect_tcp[U32](_conn,
+        _host.cstring(), _service.cstring(),
+        _from.cstring())
+      _notify_reconnecting()
+    end
