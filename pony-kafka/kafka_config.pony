@@ -377,10 +377,10 @@ class KafkaConfig
 
   new create(logger': Logger[String], client_name': String,
     fetch_interval': U64 = 100_000_000, min_fetch_bytes': I32 = 1,
-    max_fetch_bytes': I32 = 32768, produce_acks': I16 = 1,
+    max_fetch_bytes': I32 = 100_000_000, produce_acks': I16 = -1,
     produce_timeout_ms': I32 = 100,
     use_java_compatible_snappy_compression': Bool = false,
-    max_inflight_requests': USize = 5, partition_fetch_max_bytes': I32 = 32768,
+    max_inflight_requests': USize = 5, partition_fetch_max_bytes': I32 = 1_048_576,
     max_message_size': I32 = 1000000,
     refresh_metadata_interval': U64 = 300_000_000_000,
     max_produce_buffer_ms': U64 = 0,
@@ -1160,6 +1160,11 @@ actor KafkaClient
 
     update_read_only_topic_mapping()
 
+    // if not full initialized then don't update mapping to send to producers
+    if not fully_initialized then
+      return
+    end
+
     // send updated topic mapping to producers so they can pause/buffer
     // producing
     for p in _producers.values() do
@@ -1284,6 +1289,11 @@ actor KafkaClient
     end
 
     update_read_only_topic_mapping()
+
+    // if not full initialized then don't update mapping to send to producers
+    if not fully_initialized then
+      return
+    end
 
     // TODO: do we really need to track unthrottle acks? Might be able to ignore
     // it since there's no synchronization need regarding acks for unthrottles

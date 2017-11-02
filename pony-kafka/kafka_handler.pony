@@ -1429,16 +1429,25 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
   // update state for next offsets to request based on fetched data
   fun ref update_offsets_fetch_response(fetch_results: Map[String,
-    _KafkaTopicFetchResult]) ?
+    _KafkaTopicFetchResult]): Bool ?
   =>
+    // default to fetching based on timer interval
+    var fetch_immediately: Bool = false
+
     for topic in fetch_results.values() do
       for part in topic.partition_responses.values() do
         if part.largest_offset_seen != -1 then
           _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
             .request_offset = part.largest_offset_seen + 1
+
+          // we read new data from a topic...
+          // fetch immediately because there is likely more data waiting for us to fetch..
+          fetch_immediately = true
         end
       end
     end
+
+    fetch_immediately
 
 
   // dispatch method for decoding response from kafka after matching it up to
@@ -1540,11 +1549,14 @@ class _KafkaHandler is CustomTCPConnectionNotify
         end
 
         process_fetched_data(fetched_data, network_received_timestamp)
-        update_offsets_fetch_response(fetched_data)?
-        let timer = Timer(_KafkaFetchRequestTimerNotify(conn),
-          _conf.fetch_interval)
-        fetch_data_timer = timer
-        _timers(consume timer)
+        if update_offsets_fetch_response(fetched_data)? then
+          consume_messages(conn)?
+        else
+          let timer = Timer(_KafkaFetchRequestTimerNotify(conn),
+            _conf.fetch_interval)
+          fetch_data_timer = timer
+          _timers(consume timer)
+        end
     | let produce_api: _KafkaProduceApi
       =>
         _conf.logger(Fine) and _conf.logger.log(Fine, _name +
