@@ -42,10 +42,29 @@ primitive KafkaLZ4TopicCompression
   fun box apply(): I8 => 3
 
 
+// initial consumer starting offsets for when first starting client
+type ConsumerRequestOffset is (KafkaOffsetBeginning |
+  KafkaOffsetEnd | I32)
+
+primitive KafkaOffsetBeginning
+
+primitive KafkaOffsetEnd
+
+
+
 primitive _KafkaProducerAuth
 
-// trait for a kafka client manager (this will get adminitrative messages
+// trait for a network sniffer for sniffing/logging kafka network traffic
+trait KafkaNetworkSniffer
+  be data_sent(broker_id: I32, data: ByteSeqIter)
+  be data_received(broker_id: I32, data: Array[U8] iso)
+
+// trait for a kafka client manager (this will get adminitrative messages)
 trait KafkaClientManager
+  // new partitions for a topic start out paused for the consumer
+  // the manager gets informed whenenever the topic/partition list
+  // changes. It is the reponsibility of the manager to tell the
+  // client consumer to resume the new partitions if desired.
   be receive_kafka_topics_partitions(topic_partitions: Map[String,
     (KafkaTopicType, Set[I32])] val)
 
@@ -54,24 +73,24 @@ trait KafkaClientManager
 
 // trait for a kafka consumer
 trait KafkaConsumer
-  be receive_kafka_message(msg: KafkaMessage val,
+  be receive_kafka_message(value: Array[U8] iso, key: (Array[U8] val | None), msg_metadata: KafkaMessageMetadata val,
     network_received_timestamp: U64)
 
 // trait for a kafka producer
 trait KafkaProducer
-  fun ref update_producer_mapping(mapping: KafkaProducerMapping):
+  fun ref create_producer_mapping(mapping: KafkaProducerMapping):
     (KafkaProducerMapping | None)
 
   fun ref producer_mapping(): (KafkaProducerMapping | None)
 
   // called by kafka client to let producers know of updated producer mapping
   be _create_producer_mapping(mapping: KafkaProducerMapping iso) =>
-    let old = update_producer_mapping(consume mapping)
+    let old = create_producer_mapping(consume mapping)
 
     match old
     | let pm: KafkaProducerMapping =>
       pm.conf.logger(Error) and
-      pm.conf.logger.log(Error, "Creating producer mapping when it has " +
+      pm.conf.logger.log(Error, "Created producer mapping when it has " +
       "already been created. This should never happen.")
     else
       kafka_producer_ready()
@@ -136,8 +155,10 @@ trait KafkaProducerMessageHandler
 
 // trait for a class that can handle kafka messages on consume (distributing
 // messages to consumers on receive)
+// TODO: Can't pass in `value` as a `box` also right now because pony only allows for one item to be recovered back to an iso
+//       figure out a solution? does it even matter?
 trait KafkaConsumerMessageHandler
-  fun ref apply(consumers: Array[KafkaConsumer tag] val, msg: KafkaMessage val):
+  fun ref apply(consumers: Array[KafkaConsumer tag] val, key: (Array[U8] box | None), msg_metadata: KafkaMessageMetadata val):
      (KafkaConsumer tag | None)
 
   fun clone(): KafkaConsumerMessageHandler iso^
@@ -181,7 +202,7 @@ class KafkaProducerHashPartitioner is KafkaProducerMessageHandler
   =>
     // TODO: replace Crc32 with Murmur2 to be compatible with default partitions
     // for java client?
-    // Crc32 shoule be compatible with C client
+    // Crc32 should be compatible with C client
     match key
     | let a: Array[U8] val => (Crc32.crc32(a) % num_partitions.usize()).i32()
     | let s: String =>
@@ -223,7 +244,7 @@ class KafkaRoundRobinConsumerMessageHandler is KafkaConsumerMessageHandler
 
   new create() => None
 
-  fun ref apply(consumers: Array[KafkaConsumer tag] val, msg: KafkaMessage val):
+  fun ref apply(consumers: Array[KafkaConsumer tag] val, key: (Array[U8] box | None), msg_metadata: KafkaMessageMetadata val):
      (KafkaConsumer tag | None)
   =>
     try consumers(_x = (_x + 1) % consumers.size())? end
@@ -239,7 +260,7 @@ class KafkaRandomConsumerMessageHandler is KafkaConsumerMessageHandler
     _seed = seed
     _mt = MT(_seed)
 
-  fun ref apply(consumers: Array[KafkaConsumer tag] val, msg: KafkaMessage val):
+  fun ref apply(consumers: Array[KafkaConsumer tag] val, key: (Array[U8] box | None), msg_metadata: KafkaMessageMetadata val):
      (KafkaConsumer tag | None)
   =>
     try consumers(_mt.next().usize() % consumers.size())? end
@@ -250,10 +271,10 @@ class KafkaRandomConsumerMessageHandler is KafkaConsumerMessageHandler
 class KafkaPartitionConsumerMessageHandler is KafkaConsumerMessageHandler
   new create() => None
 
-  fun ref apply(consumers: Array[KafkaConsumer tag] val, msg: KafkaMessage val):
+  fun ref apply(consumers: Array[KafkaConsumer tag] val, key: (Array[U8] box | None), msg_metadata: KafkaMessageMetadata val):
      (KafkaConsumer tag | None)
   =>
-    try consumers(msg.get_partition_id().usize() % consumers.size())? end
+    try consumers(msg_metadata.get_partition_id().usize() % consumers.size())? end
 
   fun clone(): KafkaConsumerMessageHandler iso^ =>
     recover iso KafkaPartitionConsumerMessageHandler end
@@ -261,13 +282,12 @@ class KafkaPartitionConsumerMessageHandler is KafkaConsumerMessageHandler
 class KafkaHashConsumerMessageHandler is KafkaConsumerMessageHandler
   new create() => None
 
-  fun ref apply(consumers: Array[KafkaConsumer tag] val, msg: KafkaMessage val):
+  fun ref apply(consumers: Array[KafkaConsumer tag] val, key: (Array[U8] box | None), msg_metadata: KafkaMessageMetadata val):
      (KafkaConsumer tag | None)
   =>
-    let key = msg.get_key()
     try
       match key
-      | let k: Array[U8] val => consumers(@ponyint_hash_block[U64](k.cpointer(),
+      | let k: Array[U8] box => consumers(@ponyint_hash_block[U64](k.cpointer(),
          k.size()).usize() % consumers.size())?
       else
         consumers(0)? // always return first consumer
@@ -285,19 +305,18 @@ class KafkaHashRoundRobinConsumerMessageHandler is KafkaConsumerMessageHandler
     rr_handler = KafkaRoundRobinConsumerMessageHandler
     hash_handler = KafkaHashConsumerMessageHandler
 
-  fun ref apply(consumers: Array[KafkaConsumer tag] val, msg: KafkaMessage val):
+  fun ref apply(consumers: Array[KafkaConsumer tag] val, key: (Array[U8] box | None), msg_metadata: KafkaMessageMetadata val):
      (KafkaConsumer tag | None)
   =>
-    let key = msg.get_key()
     match key
-    | let a: Array[U8] val =>
+    | let a: Array[U8] box =>
       if a.size() > 0 then
-        hash_handler(consumers, msg)
+        hash_handler(consumers, key, msg_metadata)
       else
-        rr_handler(consumers, msg)
+        rr_handler(consumers, key, msg_metadata)
       end
     else
-      rr_handler(consumers, msg)
+      rr_handler(consumers, key, msg_metadata)
     end
 
   fun clone(): KafkaConsumerMessageHandler iso^ =>
@@ -315,7 +334,7 @@ class val KafkaErrorReport
     partition = partition'
 
   fun string(): String =>
-    "KafkaProducerDeliveryReport: [ "
+    "KafkaErrorReport: [ "
       + "status = " + status.string()
       + ", topic = " + topic
       + ", partition = " + partition.string()
@@ -366,23 +385,28 @@ class KafkaConfig
   let produce_acks: I16
   let produce_timeout_ms: I32
   let logger: Logger[String]
-  let use_java_compatible_snappy_compression: Bool
+  let use_snappy_java_framing: Bool
   let max_inflight_requests: USize
   let partition_fetch_max_bytes: I32
   let max_message_size: I32
   let max_produce_buffer_time: U64
   let max_produce_buffer_messages: U64
+  let check_crc: Bool
+  var network_sniffer: (KafkaNetworkSniffer tag | None)
 
   new create(logger': Logger[String], client_name': String,
     fetch_interval': U64 = 100_000_000, min_fetch_bytes': I32 = 1,
-    max_fetch_bytes': I32 = 32768, produce_acks': I16 = 1,
+    max_fetch_bytes': I32 = 100_000_000, produce_acks': I16 = -1,
     produce_timeout_ms': I32 = 100,
-    use_java_compatible_snappy_compression': Bool = false,
-    max_inflight_requests': USize = 5, partition_fetch_max_bytes': I32 = 32768,
-    max_message_size': I32 = 1000000,
+    use_snappy_java_framing': Bool = false,
+    max_inflight_requests': USize = 1_000_000,
+    partition_fetch_max_bytes': I32 = 1_048_576,
+    max_message_size': I32 = 1_000_000,
     refresh_metadata_interval': U64 = 300_000_000_000,
     max_produce_buffer_ms': U64 = 0,
-    max_produce_buffer_messages': U64 = 0)
+    max_produce_buffer_messages': U64 = 0,
+    check_crc': Bool = false,
+    network_sniffer': (KafkaNetworkSniffer tag | None) = None)
   =>
     client_name = client_name'
     fetch_interval = fetch_interval'
@@ -391,14 +415,15 @@ class KafkaConfig
     produce_acks = produce_acks'
     produce_timeout_ms = produce_timeout_ms'
     logger = logger'
-    use_java_compatible_snappy_compression =
-      use_java_compatible_snappy_compression'
+    use_snappy_java_framing = use_snappy_java_framing'
     max_inflight_requests = max_inflight_requests'
     partition_fetch_max_bytes = partition_fetch_max_bytes'
     max_message_size = max_message_size'
     refresh_metadata_interval = refresh_metadata_interval'
     max_produce_buffer_time = max_produce_buffer_ms' * 1_000_000
     max_produce_buffer_messages = max_produce_buffer_messages'
+    check_crc = check_crc'
+    network_sniffer = network_sniffer'
 
   fun ref _set_replica_id(replica_id': I32) =>
     replica_id = replica_id'
@@ -411,11 +436,13 @@ class KafkaConfig
     producer_message_handler: KafkaProducerMessageHandler val
     = recover val KafkaProducerHashRoundRobinPartitioner end,
     consumer_message_handler: KafkaConsumerMessageHandler val = recover val
-    KafkaRoundRobinConsumerMessageHandler end,
-    compression: KafkaTopicCompressionType = KafkaNoTopicCompression)
+    KafkaHashRoundRobinConsumerMessageHandler end,
+    compression: KafkaTopicCompressionType = KafkaNoTopicCompression,
+    default_consumer_start_offset': ConsumerRequestOffset = KafkaOffsetBeginning,
+    partitions': (Array[I32] val | Array[(I32, ConsumerRequestOffset)] val | None) = None)
   =>
     let topic_config = KafkaTopicConfig(topic_name, role,
-      producer_message_handler, consumer_message_handler, compression)
+      producer_message_handler, consumer_message_handler, compression, default_consumer_start_offset', partitions')
 
     topics(topic_config.topic_name) = topic_config
 
@@ -438,13 +465,17 @@ class KafkaTopicConfig is Equatable[KafkaTopicConfig box]
   let consumer_message_handler: KafkaConsumerMessageHandler val
   let role: KafkaTopicType
   let compression: KafkaTopicCompressionType
+  let partitions: Map[I32, ConsumerRequestOffset]
+  let default_consumer_start_offset: ConsumerRequestOffset
 
   new create(topic_name': String, role': KafkaTopicType = KafkaProduceOnly,
     producer_message_handler': KafkaProducerMessageHandler val = recover val
     KafkaProducerHashRoundRobinPartitioner end,
     consumer_message_handler': KafkaConsumerMessageHandler val = recover val
-    KafkaRoundRobinConsumerMessageHandler end,
-    compression': KafkaTopicCompressionType = KafkaNoTopicCompression)
+    KafkaHashRoundRobinConsumerMessageHandler end,
+    compression': KafkaTopicCompressionType = KafkaNoTopicCompression,
+    default_consumer_start_offset': ConsumerRequestOffset = KafkaOffsetBeginning,
+    partitions': (Array[I32] val | Array[(I32, ConsumerRequestOffset)] val | None) = None)
   =>
     topic_name = topic_name'
     role = role'
@@ -453,6 +484,24 @@ class KafkaTopicConfig is Equatable[KafkaTopicConfig box]
     consumer_message_handler = consumer_message_handler'
 
     producer_message_handler = producer_message_handler'
+
+    default_consumer_start_offset = default_consumer_start_offset'
+
+    partitions = match partitions'
+      | None => partitions.create()
+      | let parts: Array[(I32, ConsumerRequestOffset)] val =>
+        let parts' = partitions.create()
+        for (p, o) in parts.values() do
+          parts'(p) = o
+        end
+        parts'
+      | let parts: Array[I32] val =>
+        let parts' = partitions.create()
+        for p in parts.values() do
+          parts'(p) = default_consumer_start_offset'
+        end
+        parts'
+      end
 
   fun hash(): U64 =>
     topic_name.hash()
@@ -464,6 +513,7 @@ class KafkaTopicConfig is Equatable[KafkaTopicConfig box]
 // and sending them to the appropriate broker connections for transmitting to
 // kafka brokers
 class KafkaProducerMapping
+  let kc: KafkaClient
   let conf: KafkaConfig val
   var topic_mapping: Map[String, Map[I32, I32]] val
   var brokers: Map[I32, (_KafkaBroker val, KafkaBrokerConnection tag)] val
@@ -472,11 +522,12 @@ class KafkaProducerMapping
   let _auth: _KafkaProducerAuth = _KafkaProducerAuth
   let _producer: KafkaProducer tag
 
-  new create(conf': KafkaConfig val,
+  new create(kc': KafkaClient, conf': KafkaConfig val,
     topic_mapping': Map[String, Map[I32, I32]] val,
     brokers': Map[I32, (_KafkaBroker val, KafkaBrokerConnection tag)] val,
     producer: KafkaProducer tag)
   =>
+    kc = kc'
     conf = conf'
     _producer = producer
     topic_mapping = topic_mapping'
@@ -501,6 +552,7 @@ class KafkaProducerMapping
     topic_mapping = topic_mapping'
 
   // main logic for sending messages to brokers
+  // TODO: Add ability to specify timestamp... should timestamp be for all messages or per message in this case?
   fun ref send_topic_messages(
     topic: String, msgs: Array[(Any tag, (ByteSeq | Array[ByteSeq] val),
     (None | ByteSeq | Array[ByteSeq] val))]):
@@ -533,7 +585,7 @@ class KafkaProducerMapping
             end
 
           if (key_size + value_size) > conf.max_message_size.usize() then
-            error_msgs'.push((ErrorClientMessageTooLarge, -1, opaque))
+            error_msgs'.push((ClientErrorMessageTooLarge, -1, opaque))
             continue
           end
 
@@ -543,17 +595,15 @@ class KafkaProducerMapping
             as I32 else -1 end
 
           if (part_id < 0) or (part_id > tm.size().i32()) then
-            error_msgs'.push((KafkaClientInvalidPartition, part_id, opaque))
+            error_msgs'.push((ClientErrorInvalidPartition, part_id, opaque))
             continue
           end
 
           let broker_id = tm(part_id)?
 
           if broker_id == -999 then
-            // TODO: implement buffering logic for throttled brokers
-            conf.logger(Error) and conf.logger.log(Error,
-              "Error buffering logic for throttled brokers not implemented!")
-            error_msgs'.push((KafkaClientNoBuffering, part_id, opaque))
+            // TODO: implement buffering logic for throttled brokers... maybe?
+            error_msgs'.push((ClientErrorNoBuffering, part_id, opaque))
             continue
           end
 
@@ -568,25 +618,24 @@ class KafkaProducerMapping
           try
             msgs_to_send(part_id)?.push(m)
           else
-            conf.logger(Error) and conf.logger.log(Error,
-              "Error adding message to array in map. This should never happen.")
-            error_msgs'.push((KafkaClientShouldNeverHappen, part_id, opaque))
+            kc._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(
+              "Error adding message to array in map. This should never happen."),
+              topic, part_id))
+            return error_msgs
           end
         end
       else
-        conf.logger(Error) and conf.logger.log(Error, "Error loading " +
-          "configuration or state while preparing messages to send for " +
-          "topic: " + topic + ". This should never happen.")
-        for (opaque, value, key) in msgs.values() do
-          error_msgs'.push((KafkaClientShouldNeverHappen, -1, opaque))
-        end
-        return error_msgs'
+        kc._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(
+          "Error loading " + "configuration or state while preparing messages "
+          + "to send for topic: " + topic + ". This should never happen."),
+          topic, -1))
+        return error_msgs
       end
 
     else
       let error_msgs' = Array[(KafkaError, I32, Any tag)]
       for (opaque, value, key) in msgs.values() do
-        error_msgs'.push((KafkaClientProducerTopicNotRegistered, -1, opaque))
+        error_msgs'.push((ClientErrorProducerTopicNotRegistered, -1, opaque))
       end
       return error_msgs'
     end
@@ -612,7 +661,8 @@ class KafkaProducerMapping
 
   fun ref send_topic_message(topic: String, opaque: Any tag,
     value: (ByteSeq | Array[ByteSeq] val),
-    key: (None | ByteSeq | Array[ByteSeq] val) = None):
+    key: (None | ByteSeq | Array[ByteSeq] val) = None,
+    ts: (I64 | None) = None):
     (None | (KafkaError, I32, Any tag))
   =>
     if conf.producer_topics.contains(topic) then
@@ -634,7 +684,7 @@ class KafkaProducerMapping
           end
 
         if (key_size + value_size) > conf.max_message_size.usize() then
-          return (ErrorClientMessageTooLarge, -1, opaque)
+          return (ClientErrorMessageTooLarge, -1, opaque)
         end
 
         // run user specified message partitioner to determine which partition
@@ -647,20 +697,18 @@ class KafkaProducerMapping
           end
 
         if (part_id < 0) or (part_id > tm.size().i32()) then
-          return (KafkaClientInvalidPartition, part_id, opaque)
+          return (ClientErrorInvalidPartition, part_id, opaque)
         end
 
         let broker_id = tm(part_id)?
 
         if broker_id == -999 then
-          // TODO: implement buffering logic for throttled brokers
-          conf.logger(Error) and conf.logger.log(Error,
-            "Error buffering logic for throttled brokers not implemented!")
-          return (KafkaClientNoBuffering, part_id, opaque)
+          // TODO: implement buffering logic for throttled brokers... maybe?
+          return (ClientErrorNoBuffering, part_id, opaque)
         end
 
         let msg = recover val ProducerKafkaMessage(_producer, opaque, value,
-          value_size, key, key_size) end
+          value_size, key, key_size, ts) end
 
         // send message to appropriate broker
         conf.logger(Fine) and conf.logger.log(Fine, "Sending message to broker")
@@ -669,18 +717,18 @@ class KafkaProducerMapping
           try
             brokers(broker_id)?
           else
-            conf.logger(Error) and conf.logger.log(Error,
-              "Error looking up brokers(broker_id): " + broker_id.string())
-            error
+            return (ClientErrorUnableToLookupBroker, part_id, opaque)
           end
 
         broker_tag.send_kafka_message(topic, part_id, msg, _auth)
       else
-        conf.logger(Error) and conf.logger.log(Error,
-          "Error preparing message to send for topic: " + topic)
+        kc._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(
+          "Error preparing message to send for topic: " + topic),
+          topic, -1))
+        return None
       end
     else
-      return (KafkaClientProducerTopicNotRegistered, -1, opaque)
+      return (ClientErrorProducerTopicNotRegistered, -1, opaque)
     end
 
     None
@@ -688,6 +736,8 @@ class KafkaProducerMapping
 // kafka client actor is responsible for creating broker connections and making
 // sure everything is set up/coordinated correctly
 actor KafkaClient
+  let _initial_broker_connections: SetIs[KafkaBrokerConnection tag] =
+    _initial_broker_connections.create()
   let _conf: KafkaConfig val
   let _brokers: Map[I32, (_KafkaBroker val, KafkaBrokerConnection tag)] =
     _brokers.create()
@@ -748,10 +798,13 @@ actor KafkaClient
     end
 
     // create initial broker connections for discovering kafka metadata; these
-    // kill themselves after reading metadata
+    // get killed after reading metadata when initialization is complete
+    var initial_broker_connection_id: I32 = -1
     for b in _conf.brokers.values() do
-      _broker_connection_factory(_auth, recover iso _KafkaHandler(this, _conf,
-        _topic_consumer_handlers_read_only) end, b.host, b.port.string())
+      let bc = _broker_connection_factory(_auth, recover iso _KafkaHandler(this,
+        _conf, _topic_consumer_handlers_read_only, initial_broker_connection_id) end, b.host, b.port.string())
+      _initial_broker_connections.set(bc)
+      initial_broker_connection_id = initial_broker_connection_id - 1
     end
 
   fun ref _update_consumer_handlers_read_only() =>
@@ -811,8 +864,9 @@ actor KafkaClient
         end
       end
     else
-      _conf.logger(Error) and _conf.logger.log(Error,
-        "Error adding consumers to topic_consumers. This should never happen.")
+      _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(
+        "Error adding consumers to topic_consumers."), topic, -1))
+      return
     end
 
     update_consumers_read_only()
@@ -827,8 +881,10 @@ actor KafkaClient
       try
         _topic_consumers(topic)?.clear()
       else
-        _conf.logger(Error) and _conf.logger.log(Error, "Error clearing " +
-          "consumers in topic_consumers. This should never happen.")
+        _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Error clearing " +
+          "consumers in topic_consumers. This should never happen."),
+          topic, -1))
+        return
       end
     end
 
@@ -853,8 +909,10 @@ actor KafkaClient
           partition_id.string() + ".")
       end
     else
-      _conf.logger(Error) and _conf.logger.log(Error, "Error pausing topic: " +
-        topic + " and partition: " + partition_id.string() + ".")
+      _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Error pausing topic: " +
+        topic + " and partition: " + partition_id.string() + "."),
+        topic, partition_id))
+      return
     end
 
     if something_paused then
@@ -887,6 +945,8 @@ actor KafkaClient
       end
     end
 
+  // TODO: Add ability to specify offset to resume from with offset of -999 means continue from current (need to propagate to broker connections and also make sure that it doesn't get overwritten by a fetch reponse in case of an outstanding request)
+  // to both this and consumer_resume_all
   be consumer_resume(topic: String, partition_id: I32) =>
     var something_resumed: Bool = false
 
@@ -902,9 +962,10 @@ actor KafkaClient
           partition_id.string() + ".")
       end
     else
-      _conf.logger(Error) and _conf.logger.log(Error,
-        "Error resuming consuming topic: " + topic + " and partition: " +
-        partition_id.string() + ".")
+      _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Error resuming consuming topic: " + topic + " and partition: " +
+        partition_id.string() + "."),
+        topic, partition_id))
+      return
     end
 
     if something_resumed then
@@ -942,7 +1003,40 @@ actor KafkaClient
 
     // send all producers their producer mappings so they can start producing
     if (not fully_initialized) and (_uninitialized_brokers.size() == 0) then
+      // dispose initial broker connections
+      for bc in _initial_broker_connections.values() do
+        bc.dispose()
+      end
+      _initial_broker_connections.clear()
+
+      // we're not fully initialized
       fully_initialized = true
+
+      // check and throw errors for any missing partitions that the user specified
+      for (topic, topic_config) in _conf.topics.pairs() do
+        // if a topic is unknown by kafka it should already have been caught earlier
+        let topic_leader_state = try _topic_leader_state(topic)?
+              else
+                _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Topic state doesn't exist."),
+                  topic, -1))
+                return
+              end
+        for part_id in topic_config.partitions.keys() do
+          // TODO: expand kafkaconfig state stuff to keep track of error codes and use it to
+          // only throw an error for unknown partition if no errors encountered
+          // if no topic errors encountered
+//          if topic_leader_state.error_code == ErrorNone() then
+            // if the partition id doesn't exist it's an error
+            if not topic_leader_state.contains(part_id) then
+              _unrecoverable_error(KafkaErrorReport(ClientErrorPartitionFail,
+                topic, part_id))
+              return
+            end
+//          end
+        end
+      end
+
+      // send producer mappings to all producers so they can start producing
       create_and_send_producer_mappings()
     end
 
@@ -952,6 +1046,63 @@ actor KafkaClient
     var topic_mapping_modified: Bool = false
     var new_topic_partition_added: Bool = false
 
+    // update topic partition/leader mapping if something changed
+    for tmeta in meta.topics_metadata.values() do
+        // TODO: add error handling for invalid topics and other possible errors
+        let kafka_topic_error = MapKafkaError(_conf.logger, tmeta.topic_error_code)
+        match kafka_topic_error
+        | ErrorNone => None
+        | ErrorLeaderNotAvailable => None // broker connection will refresh metadata until it's available
+        else
+          _conf.logger(Error) and _conf.logger.log(Error,
+            "Encountered topic error for topic: " + tmeta.topic +
+            "! Error: " + kafka_topic_error.string())
+          _unrecoverable_error(KafkaErrorReport(kafka_topic_error,
+            tmeta.topic, -1))
+          return
+        end
+
+      let topic_leader_state = try _topic_leader_state(tmeta.topic)?
+        else
+          let tm = Map[I32, (I32, Bool, Bool)]
+          _topic_leader_state(tmeta.topic) = tm
+          topic_mapping_modified = true
+          new_topic_partition_added = true
+          tm
+        end
+
+      for part_meta in tmeta.partitions_metadata.values() do
+        // TODO: add error handling for partition errors
+        let kafka_partition_error =
+          MapKafkaError(_conf.logger, part_meta.partition_error_code)
+        match kafka_partition_error
+        | ErrorNone => None
+        | ErrorLeaderNotAvailable => None // broker connection will refresh metadata until it's available
+        else
+          _conf.logger(Error) and _conf.logger.log(Error,
+            "Encountered topic error for topic: " + tmeta.topic +
+            ", partition: " + part_meta.partition_id.string() + "! Error: "
+            + kafka_partition_error.string())
+          _unrecoverable_error(KafkaErrorReport(
+            kafka_partition_error, tmeta.topic, part_meta.partition_id))
+          return
+        end
+
+        (let current_part_leader, let throttled, let consume_paused) =
+          topic_leader_state.get_or_else(part_meta.partition_id, (-99, true,
+          true))
+        // New partitions/topics start out throttled. Broker connection has to
+        // explicitly unthrottle
+        if current_part_leader != part_meta.leader then
+          topic_leader_state(part_meta.partition_id) = (part_meta.leader,
+            throttled, consume_paused)
+          topic_mapping_modified = true
+          new_topic_partition_added = if current_part_leader == -99 then true
+            else new_topic_partition_added end
+        end
+      end
+    end
+
     // create permanent broker connections to all kafka brokers
     for b in meta.brokers.values() do
       if _brokers.contains(b.node_id) then
@@ -960,8 +1111,10 @@ actor KafkaClient
             (_, let bc) = _brokers(b.node_id)?
             bc._update_metadata(meta)
           else
-            _conf.logger(Error) and _conf.logger.log(Error, "Error looking " +
-              "up broker_id in _brokers map. This should never happen.")
+            _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Error looking " +
+              "up broker_id in _brokers map. This should never happen."),
+              "N/A", -1))
+            return
           end
         end
       else
@@ -1008,33 +1161,6 @@ actor KafkaClient
       end
 
       _brokers_read_only = final_brokers_list
-    end
-
-    // update topic partition/leader mapping if something changed
-    for tmeta in meta.topics_metadata.values() do
-      let topic_leader_state = try _topic_leader_state(tmeta.topic)?
-        else
-          let tm = Map[I32, (I32, Bool, Bool)]
-          _topic_leader_state(tmeta.topic) = tm
-          topic_mapping_modified = true
-          new_topic_partition_added = true
-          tm
-        end
-
-      for part_meta in tmeta.partitions_metadata.values() do
-        (let current_part_leader, let throttled, let consume_paused) =
-          topic_leader_state.get_or_else(part_meta.partition_id, (-99, true,
-          true))
-        // New partitions/topics start out throttled. Broker connection has to
-        // explicitly unthrottle
-        if current_part_leader != part_meta.leader then
-          topic_leader_state(part_meta.partition_id) = (part_meta.leader,
-            throttled, consume_paused)
-          topic_mapping_modified = true
-          new_topic_partition_added = if current_part_leader == -99 then true
-            else new_topic_partition_added end
-        end
-      end
     end
 
     // if topic mapping changed, tell all producers and send all brokers latest
@@ -1094,26 +1220,35 @@ actor KafkaClient
     let map_topic_mapping: Map[String, Map[I32, I32]] iso = recover iso
       map_topic_mapping.create() end
     for (topic, topic_leader_state) in _topic_leader_state.pairs() do
+      // only add topic if it's marked for producing in the config
+      if not _conf.producer_topics.contains(topic) then
+        break
+      end
       try
         let map_topic_part_mapping: Map[I32, I32] iso = recover
           map_topic_part_mapping.create() end
         for (partition_id, (leader_id, throttled, consume_paused)) in
           topic_leader_state.pairs() do
-          map_topic_part_mapping.insert(partition_id, if throttled then -999
-            else leader_id end)?
+          if not _conf.topics(topic)?.partitions.contains(partition_id) then
+            map_topic_part_mapping.insert(partition_id, if throttled then -999
+              else leader_id end)?
+          end
         end
-        map_topic_mapping.insert(topic, consume map_topic_part_mapping)?
+        if map_topic_part_mapping.size() > 0 then
+          map_topic_mapping.insert(topic, consume map_topic_part_mapping)?
+        end
       end
     end
 
     _topic_mapping_read_only = consume map_topic_mapping
 
   // only tell producers if there are actually topics to produce on by the
-  // client
+  // client; this is only called after we're `fully_initialized`
   fun create_and_send_producer_mappings() =>
-    if _conf.producer_topics.size() > 0 then
+    // only send topic mapping if it's got valid partitions/topics for producing added to it
+    if _topic_mapping_read_only.size() > 0 then
       for p in _producers.values() do
-        p._create_producer_mapping(recover iso KafkaProducerMapping(_conf,
+        p._create_producer_mapping(recover iso KafkaProducerMapping(this, _conf,
           _topic_mapping_read_only, _brokers_read_only, p) end)
       end
     end
@@ -1122,7 +1257,9 @@ actor KafkaClient
   be register_producer(p: KafkaProducer tag) =>
     _producers.set(p)
 
-    if (_conf.producer_topics.size() > 0) and fully_initialized then
+    // only send topic mapping if it's got valid partitions/topics for producing added to it
+    // and we're fully_initialized
+    if (_topic_mapping_read_only.size() > 0) and fully_initialized then
       // only create producer mapping if we're fully initialized
 
       // simulate throttle ack for any outstanding throttle requests
@@ -1136,7 +1273,7 @@ actor KafkaClient
       end
 
       // create producer mapping
-      p._create_producer_mapping(recover iso KafkaProducerMapping(_conf,
+      p._create_producer_mapping(recover iso KafkaProducerMapping(this, _conf,
         _topic_mapping_read_only, _brokers_read_only, p) end)
     end
 
@@ -1153,6 +1290,11 @@ actor KafkaClient
     end
 
     update_read_only_topic_mapping()
+
+    // if not full initialized then don't update mapping to send to producers
+    if not fully_initialized then
+      return
+    end
 
     // send updated topic mapping to producers so they can pause/buffer
     // producing
@@ -1203,9 +1345,11 @@ actor KafkaClient
             consume_paused)
         end
       else
-        _conf.logger(Error) and _conf.logger.log(Error, "Leader change " +
+        _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Leader change " +
           "throttle: Error looking up topic or partition leader/throttle " +
-          "info. This should never happen.")
+          "info. This should never happen."),
+          "N/A", -1))
+        return
       end
     end
 
@@ -1228,9 +1372,11 @@ actor KafkaClient
   be throttle_ack(topic_mapping: Map[String, Map[I32, I32]] val, actual_p:
     KafkaProducer tag, sent_p: KafkaProducer tag) =>
     if not (actual_p is sent_p) then
-      _conf.logger(Error) and _conf.logger.log(Error, "Throttle: Actual " +
+      _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Throttle: Actual " +
         "producer and sent producer are not the same! This should never " +
-        "happen.")
+        "happen."),
+        "N/A", -1))
+      return
     end
 
     try
@@ -1247,9 +1393,11 @@ actor KafkaClient
         bc._leader_change_throttle_ack(topics_to_throttle)
       end
     else
-      _conf.logger(Error) and _conf.logger.log(Error, "Throttle: Error " +
+      _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Throttle: Error " +
         "looking up topic_mapping in _leader_change_throttle_acks. This " +
-        "should never happen.")
+        "should never happen."),
+        "N/A", -1))
+      return
     end
 
   be _leader_change_unthrottle(
@@ -1270,14 +1418,21 @@ actor KafkaClient
             fully_unthrottled = false
           end
         else
-          _conf.logger(Error) and _conf.logger.log(Error, "Leader change " +
+          _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Leader change " +
             "unthrottle: Error looking up topic or partition in " +
-            "topics_to_unthrottle. This should never happen.")
+            "topics_to_unthrottle. This should never happen."),
+            topic, partition_id))
+          return
         end
       end
     end
 
     update_read_only_topic_mapping()
+
+    // if not full initialized then don't update mapping to send to producers
+    if not fully_initialized then
+      return
+    end
 
     // TODO: do we really need to track unthrottle acks? Might be able to ignore
     // it since there's no synchronization need regarding acks for unthrottles
@@ -1294,9 +1449,11 @@ actor KafkaClient
     actual_p: KafkaProducer tag, sent_p: KafkaProducer tag)
   =>
     if not (actual_p is sent_p) then
-      _conf.logger(Error) and _conf.logger.log(Error, "Unthrottle: Actual " +
+      _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Unthrottle: Actual " +
         "producer and sent producer are not the same! This should never " +
-        "happen.")
+        "happen."),
+        "N/A", -1))
+      return
     end
 
     try
@@ -1310,9 +1467,46 @@ actor KafkaClient
         // TODO: Notify broker of all acks received for unthrottle
       end
     else
-      _conf.logger(Error) and _conf.logger.log(Error, "Unthrottle: Error " +
+      _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Unthrottle: Error " +
         "looking up topic_mapping in _leader_change_unthrottle_acks. This " +
-        "should never happen.")
+        "should never happen."),
+        "N/A", -1))
+      return
+    end
+
+  be _recoverable_error(error_report: KafkaErrorReport, internal: Bool = false) =>
+    if internal then
+      _conf.logger(Warn) and _conf.logger.log(Warn, "Kafka Client encountered" +
+        " internal recoverable error! " + error_report.string())
+
+      match error_report.status
+      | let e: ClientErrorNoBrokerConnection =>
+        if _initial_broker_connections.contains(e.broker_tag) then
+          // remove initial broker connection from initial broker connections set
+          _initial_broker_connections.unset(e.broker_tag)
+          e.broker_tag.dispose()
+          // if set is now empty, we can give up and shut down client
+          if _initial_broker_connections.size() == 0 then
+            _unrecoverable_error(KafkaErrorReport(ClientErrorNoConnection,
+              "N/A", -1))
+          end
+        else
+          // TODO: What do do if it's a normal broker connection after initializatin is completed?
+          None
+        end
+      else
+        _conf.logger(Warn) and _conf.logger.log(Warn, "Kafka Client doesn't know how to handle" +
+          " internal recoverable error! Re-throwing as unrecoverable error: " + error_report.string())
+        // internal error we don't know how to recover from so re-throw as an unrecoverable error
+        _unrecoverable_error(error_report)
+      end
+    else
+      // log error
+      _conf.logger(Error) and _conf.logger.log(Error, "Kafka Client encountered" +
+        " recoverable error! " + error_report.string())
+
+      // let manager know of the recoverable error
+      _manager.kafka_client_error(error_report)
     end
 
   be _unrecoverable_error(error_report: KafkaErrorReport) =>
@@ -1322,7 +1516,7 @@ actor KafkaClient
 
     _conf.logger(Error) and _conf.logger.log(Error, "SHUTTING DOWN CLIENT!")
 
-    // let manager know of the unrecoverable
+    // let manager know of the unrecoverable error
     _manager.kafka_client_error(error_report)
 
     // call dispose to clean up/shut down
@@ -1331,6 +1525,11 @@ actor KafkaClient
   // TODO: Make sure dispose is being done properly and client will throw
   // errors or something if it gets future messages after dispose
   be dispose() =>
+    for bc in _initial_broker_connections.values() do
+      bc.dispose()
+    end
+    _initial_broker_connections.clear()
+
     for (_, bc) in _brokers.values() do
       bc.dispose()
     end

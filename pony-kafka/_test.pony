@@ -48,7 +48,7 @@ actor TestP is KafkaProducer
   new create() =>
     None
 
-  fun ref update_producer_mapping(mapping: KafkaProducerMapping):
+  fun ref create_producer_mapping(mapping: KafkaProducerMapping):
     (KafkaProducerMapping | None) => None
 
   be kafka_producer_ready() => None
@@ -209,13 +209,16 @@ primitive _RunOffsetsApiTest
     let offset_request: Array[ByteSeq] val =
       api_to_use.encode_request(correlation_id, conf, state.topics_state)
 
-    let rb = recover ref Reader end
+    let r = recover ref ValReader end
     for d in offset_request.values() do
       match d
-      | let s: String => rb.append(s.array())
-      | let a: Array[U8] val => rb.append(a)
+      | let s: String => r.append(s.array())
+      | let a: Array[U8] val => r.append(a)
       end
     end
+
+    let rb = recover ref IsoReader end
+    rb.append(r.block(r.size())?)
 
     let remaining_size = _KafkaI32Codec.decode(logger, rb,
       "error decoding size")?
@@ -259,16 +262,6 @@ primitive _RunProduceApiTest
     var correlation_id: I32 = 9
 
     let topic: String = "test"
-    let partition_id: I32 = 0
-
-    let state = _KafkaState
-    let topic_state = _KafkaTopicState(topic,
-      KafkaRoundRobinConsumerMessageHandler)
-    let topic_partition_state = _KafkaTopicPartitionState(0, partition_id, 0,
-      recover Array[I32] end, recover Array[I32] end)
-
-    topic_state.partitions_state(partition_id) = topic_partition_state
-    state.topics_state(topic) = topic_state
 
     // create kafka config
     let conf =
@@ -288,14 +281,16 @@ primitive _RunProduceApiTest
     let produce_request: Array[ByteSeq] val =
       api_to_use.encode_request(correlation_id, conf, msgs)
 
-    let rb = recover ref Reader end
+    let vr = recover ref ValReader end
     for d in produce_request.values() do
       match d
-      | let s: String => rb.append(s.array())
-      | let a: Array[U8] val => rb.append(a)
+      | let s: String => vr.append(s.array())
+      | let a: Array[U8] val => vr.append(a)
       end
     end
 
+    let rb = recover ref IsoReader end
+    rb.append(vr.block(vr.size())?)
 
     let remaining_size = _KafkaI32Codec.decode(logger, rb,
       "error decoding size")?
@@ -311,7 +306,7 @@ primitive _RunProduceApiTest
 
     let broker_conn = _MockKafkaBrokerConnection
     (let produce_acks', let produce_timeout', let msgs') =
-      api_to_use.decode_request(broker_conn, logger, rb, state.topics_state)?
+      api_to_use.decode_request(broker_conn, logger, rb)?
 
     h.assert_eq[I16](produce_acks', conf.produce_acks)
     h.assert_eq[I32](produce_timeout', conf.produce_timeout_ms)
@@ -325,35 +320,54 @@ primitive _RunProduceApiTest
         let pm = tm(p')?
         h.assert_eq[USize](pm'.size(), pm.size())
         for (i', m') in pm'.pairs() do
+          (let value': Array[U8] val, let key': (Array[U8] val | None | KafkaError), let meta': KafkaMessageMetadata val) = consume m'
           let m = pm(i')?
           match m.get_value()
           | let b: ByteSeq =>
-            h.assert_true(ByteSeqComparator.eq(m'.get_value(), b)?)
+            h.assert_true(ByteSeqComparator.eq(value', b)?)
           | let ba: Array[ByteSeq] val =>
-            let r = recover ref Reader end
+            let r = recover ref ValReader end
             for d in ba.values() do
               match d
               | let s: String => r.append(s.array())
               | let a: Array[U8] val => r.append(a)
               end
             end
-            h.assert_true(ByteSeqComparator.eq(m'.get_value(),
+            h.assert_true(ByteSeqComparator.eq(value',
               r.block(r.size())?)?)
           end
           match m.get_key()
           | let b: ByteSeq =>
-            h.assert_true(KeyComparator.eq(m'.get_key(), b)?)
+            match key'
+            | let k': (ByteSeq | None) =>
+              h.assert_true(KeyComparator.eq(k', b)?)
+            else
+              // force failure because KafkaError
+              h.assert_true(false)
+            end
           | let ba: Array[ByteSeq] val =>
-            let r = recover ref Reader end
+            let r = recover ref ValReader end
             for d in ba.values() do
               match d
               | let s: String => r.append(s.array())
               | let a: Array[U8] val => r.append(a)
               end
             end
-            h.assert_true(KeyComparator.eq(m'.get_key(), r.block(r.size())?)?)
+            match key'
+            | let k': (ByteSeq | None) =>
+              h.assert_true(KeyComparator.eq(k', r.block(r.size())?)?)
+            else
+              // force failure because KafkaError
+              h.assert_true(false)
+            end
           | let n: None =>
-            h.assert_true(KeyComparator.eq(m'.get_key(), n)?)
+            match key'
+            | let k': (ByteSeq | None) =>
+              h.assert_true(KeyComparator.eq(k', n)?)
+            else
+              // force failure because KafkaError
+              h.assert_true(false)
+            end
           end
         end
       end
@@ -586,34 +600,34 @@ primitive _ProduceApiCombineSplitTest
     let msgs8 = DataGen.generate_random_data(topic2, 10, 100)?
 
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs5, state.topics_state)
+      msgs5, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs6, state.topics_state)
+      msgs6, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs7, state.topics_state)
+      msgs7, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs8, state.topics_state)
+      msgs8, state.topics_state)?
 
     h.assert_eq[USize](pending_buffer.size(), 1)
     (let size, let num, _) = pending_buffer(0)?
     h.assert_eq[U64](num, 0)
 
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic,
-      msgs, state.topics_state)
+      msgs, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic,
-      msgs2, state.topics_state)
+      msgs2, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic,
-      msgs3, state.topics_state)
+      msgs3, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic,
-      msgs4, state.topics_state)
+      msgs4, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs5, state.topics_state)
+      msgs5, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs6, state.topics_state)
+      msgs6, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs7, state.topics_state)
+      msgs7, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs8, state.topics_state)
+      msgs8, state.topics_state)?
 
 
     h.assert_eq[USize](pending_buffer.size(), 4)
@@ -623,7 +637,7 @@ primitive _ProduceApiCombineSplitTest
         h.assert_true(s < 32768)
         let produce_request: Array[ByteSeq] val = api_to_use.encode_request(9,
           conf, consume m)
-        let rb = Reader
+        let rb = ValReader
         rb.append(produce_request)
         h.assert_eq[USize](s.usize(), rb.size())
       else
@@ -640,25 +654,25 @@ primitive _ProduceApiCombineSplitTest
     for (part_id, p_msgs) in msgs.pairs() do
       for m in p_msgs.values() do
         api_to_use.combine_and_split_by_message_size_single(conf,
-          pending_buffer, topic, part_id, m, state.topics_state)
+          pending_buffer, topic, part_id, m, state.topics_state)?
       end
     end
     for (part_id, p_msgs) in msgs2.pairs() do
       for m in p_msgs.values() do
         api_to_use.combine_and_split_by_message_size_single(conf,
-          pending_buffer, topic, part_id, m, state.topics_state)
+          pending_buffer, topic, part_id, m, state.topics_state)?
       end
     end
     for (part_id, p_msgs) in msgs3.pairs() do
       for m in p_msgs.values() do
         api_to_use.combine_and_split_by_message_size_single(conf,
-          pending_buffer, topic, part_id, m, state.topics_state)
+          pending_buffer, topic, part_id, m, state.topics_state)?
       end
     end
     for (part_id, p_msgs) in msgs4.pairs() do
       for m in p_msgs.values() do
         api_to_use.combine_and_split_by_message_size_single(conf,
-          pending_buffer, topic, part_id, m, state.topics_state)
+          pending_buffer, topic, part_id, m, state.topics_state)?
       end
     end
 
@@ -669,7 +683,7 @@ primitive _ProduceApiCombineSplitTest
         h.assert_true(s < 32768)
         let produce_request: Array[ByteSeq] val = api_to_use.encode_request(9,
           conf, consume m)
-        let rb = Reader
+        let rb = ValReader
         rb.append(produce_request)
         h.assert_eq[USize](s.usize(), rb.size())
       else
@@ -686,27 +700,27 @@ primitive _ProduceApiCombineSplitTest
     for (part_id, p_msgs) in msgs.pairs() do
       for m in p_msgs.values() do
         api_to_use.combine_and_split_by_message_size_single(conf,
-          pending_buffer, topic, part_id, m, state.topics_state)
+          pending_buffer, topic, part_id, m, state.topics_state)?
       end
     end
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic,
-      msgs2, state.topics_state)
+      msgs2, state.topics_state)?
     for (part_id, p_msgs) in msgs3.pairs() do
       for m in p_msgs.values() do
         api_to_use.combine_and_split_by_message_size_single(conf,
-          pending_buffer, topic, part_id, m, state.topics_state)
+          pending_buffer, topic, part_id, m, state.topics_state)?
       end
     end
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic,
-      msgs4, state.topics_state)
+      msgs4, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs5, state.topics_state)
+      msgs5, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs6, state.topics_state)
+      msgs6, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs7, state.topics_state)
+      msgs7, state.topics_state)?
     api_to_use.combine_and_split_by_message_size(conf, pending_buffer, topic2,
-      msgs8, state.topics_state)
+      msgs8, state.topics_state)?
 
     h.assert_eq[USize](pending_buffer.size(), 4)
     while pending_buffer.size() > 0 do
@@ -715,7 +729,7 @@ primitive _ProduceApiCombineSplitTest
         h.assert_true(s < 32768)
         let produce_request: Array[ByteSeq] val = api_to_use.encode_request(9,
           conf, consume m)
-        let rb = Reader
+        let rb = ValReader
         rb.append(produce_request)
         h.assert_eq[USize](s.usize(), rb.size())
       else

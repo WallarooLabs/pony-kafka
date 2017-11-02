@@ -35,18 +35,101 @@ actor Main is TestList
   new make() => None
 
   fun tag tests(test: PonyTest) =>
-    test(_TestReader)
+    test(_TestIsoReader)
+    test(_TestValReader)
     test(_TestWriter)
 
 
-class iso _TestReader is UnitTest
+class iso _TestIsoReader is UnitTest
+  """
+  Test adding to and reading from an IsoReader.
+  """
+  fun name(): String => "buffered/IsoReader"
+
+  fun apply(h: TestHelper) ? =>
+    let b = recover ref IsoReader end
+
+    b.append(recover [as U8:
+      0x42
+      0xDE; 0xAD
+      0xAD; 0xDE
+      0xDE; 0xAD; 0xBE; 0xEF
+      0xEF; 0xBE; 0xAD; 0xDE
+      0xDE; 0xAD; 0xBE; 0xEF; 0xFE; 0xED; 0xFA; 0xCE
+      0xCE; 0xFA; 0xED] end)
+
+    b.append(recover [as U8: 0xFE; 0xEF; 0xBE; 0xAD; 0xDE
+      0xDE; 0xAD; 0xBE; 0xEF; 0xFE; 0xED; 0xFA; 0xCE
+      0xDE; 0xAD; 0xBE; 0xEF; 0xFE; 0xED; 0xFA; 0xCE
+      0xCE; 0xFA; 0xED; 0xFE; 0xEF; 0xBE; 0xAD; 0xDE
+      0xCE; 0xFA; 0xED; 0xFE; 0xEF; 0xBE; 0xAD; 0xDE
+      ] end)
+
+    b.append(recover [as U8: 'h'; 'i'] end)
+    b.append(recover [as U8: '\n'; 't'; 'h'; 'e'] end)
+    b.append(recover [as U8: 'r'; 'e'; '\r'; '\n'] end)
+
+
+    // These expectations consume bytes from the head of the buffer.
+    h.assert_eq[U8](LittleEndianDecoder.u8(b)?, 0x42)
+    h.assert_eq[U16](BigEndianDecoder.u16(b)?, 0xDEAD)
+    h.assert_eq[U16](LittleEndianDecoder.u16(b)?, 0xDEAD)
+    h.assert_eq[U32](BigEndianDecoder.u32(b)?, 0xDEADBEEF)
+    h.assert_eq[U32](LittleEndianDecoder.u32(b)?, 0xDEADBEEF)
+    h.assert_eq[U64](BigEndianDecoder.u64(b)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U64](LittleEndianDecoder.u64(b)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U128](BigEndianDecoder.u128(b)?,
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+    h.assert_eq[U128](LittleEndianDecoder.u128(b)?,
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+
+
+    h.assert_eq[String](String.from_array(b.read_contiguous_bytes(2)?), "hi")
+
+    h.assert_eq[String](String.from_array(b.read_contiguous_bytes(4)?), "\nthe")
+
+    h.assert_eq[String](String.from_array(b.read_contiguous_bytes(4)?), "re\r\n")
+
+    h.assert_eq[USize](b.size(), 0)
+
+    b.append(recover [as U8: 'h'; 'i'] end)
+    b.append(recover [as U8: '\n'; 't'; 'h'; 'e'] end)
+    b.append(recover [as U8: 'r'; 'e'; '\r'; '\n'] end)
+
+    b.append(recover [as U8: 0] end)
+    b.append(recover [as U8: 172; 2] end)
+
+    b.append(recover [as U8: 'h'; 'i'] end)
+    b.append(recover [as U8: '\n'; 't'; 'h'; 'e'] end)
+    b.append(recover [as U8: 'r'; 'e'; '\r'; '\n'] end)
+
+    h.assert_eq[String](String.from_array(b.block(2)?), "hi")
+    h.assert_eq[String](String.from_array(b.block(8)?), "\nthere\r\n")
+
+    b.skip(10)?
+
+    h.assert_eq[U8](VarIntDecoder.u8(b)?, 0)
+    h.assert_eq[U32](VarIntDecoder.u32(b)?, 300)
+
+    // the last byte is consumed by the reader
+    h.assert_eq[USize](b.size(), 0)
+
+    b.append(recover [as U8: 'h'; 'i'] end)
+    b.append(recover [as U8: '\n'; 't'; 'h'; 'e'] end)
+    b.append(recover [as U8: 'r'; 'e'; '\r'; '\n'] end)
+
+    b.clear()
+
+    h.assert_eq[USize](b.size(), 0)
+
+class iso _TestValReader is UnitTest
   """
   Test adding to and reading from a Reader.
   """
-  fun name(): String => "buffered/Reader"
+  fun name(): String => "buffered/ValReader"
 
   fun apply(h: TestHelper) ? =>
-    let b = recover ref Reader end
+    let b = recover ref ValReader end
 
     b.append(recover [as U8:
       0x42
@@ -140,7 +223,7 @@ class iso _TestWriter is UnitTest
   fun name(): String => "buffered/Writer"
 
   fun apply(h: TestHelper) ? =>
-    let b = recover ref Reader end
+    let b = recover ref ValReader end
     let wb: Writer ref = Writer
 
     LittleEndianEncoder.u8(wb, 0x42)

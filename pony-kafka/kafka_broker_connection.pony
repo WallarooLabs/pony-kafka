@@ -50,11 +50,13 @@ trait KafkaBrokerConnection is CustomTCPConnection
         msg_to_send, auth)?
     end
 
+/*
   be message_consumed(msg: KafkaMessage val, success: Bool) =>
     try
       ((get_handler() as CustomTCPConnectionHandler).notify as
         _KafkaHandler).message_consumed(msg, success)
     end
+*/
 
   be _update_consumer_message_handler(topic: String,
     consumer_handler: KafkaConsumerMessageHandler val)
@@ -144,9 +146,12 @@ trait KafkaBrokerConnection is CustomTCPConnection
     try
       let handler = ((get_handler() as CustomTCPConnectionHandler).notify as
         _KafkaHandler)
-      let logger = handler.get_conf().logger
-      logger(Error) and logger.log(Error,
-        "Cannot write directly on a Kafka Broker Connection. Ignoring request.")
+      let kc = handler._get_client()
+      let name = handler._get_name()
+      kc._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(name +
+          "Cannot write directly on a Kafka Broker Connection." +
+          " This should never happen."),
+          "N/A", -1))
     end
 
   be queue(data: ByteSeq) =>
@@ -157,9 +162,12 @@ trait KafkaBrokerConnection is CustomTCPConnection
     try
       let handler = ((get_handler() as CustomTCPConnectionHandler).notify as
         _KafkaHandler)
-      let logger = handler.get_conf().logger
-      logger(Error) and logger.log(Error,
-        "Cannot queue directly on a Kafka Broker Connection. Ignoring request.")
+      let kc = handler._get_client()
+      let name = handler._get_name()
+      kc._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(name +
+          "Cannot queue directly on a Kafka Broker Connection." +
+          " This should never happen."),
+          "N/A", -1))
     end
 
   be writev(data: ByteSeqIter) =>
@@ -169,9 +177,12 @@ trait KafkaBrokerConnection is CustomTCPConnection
     try
       let handler = ((get_handler() as CustomTCPConnectionHandler).notify as
         _KafkaHandler)
-      let logger = handler.get_conf().logger
-      logger(Error) and logger.log(Error, "Cannot writev directly on a Kafka " +
-        "Broker Connection. Ignoring request.")
+      let kc = handler._get_client()
+      let name = handler._get_name()
+      kc._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(name +
+          "Cannot writev directly on a Kafka Broker Connection." +
+          " This should never happen."),
+          "N/A", -1))
     end
 
   be queuev(data: ByteSeqIter) =>
@@ -182,9 +193,12 @@ trait KafkaBrokerConnection is CustomTCPConnection
     try
       let handler = ((get_handler() as CustomTCPConnectionHandler).notify as
         _KafkaHandler)
-      let logger = handler.get_conf().logger
-      logger(Error) and logger.log(Error, "Cannot queuev directly on a Kafka " +
-        "Broker Connection. Ignoring request.")
+      let kc = handler._get_client()
+      let name = handler._get_name()
+      kc._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(name +
+          "Cannot queuev directly on a Kafka Broker Connection." +
+          " This should never happen."),
+          "N/A", -1))
     end
 
   be send_queue() =>
@@ -195,9 +209,12 @@ trait KafkaBrokerConnection is CustomTCPConnection
     try
       let handler = ((get_handler() as CustomTCPConnectionHandler).notify as
         _KafkaHandler)
-      let logger = handler.get_conf().logger
-      logger(Error) and logger.log(Error, "Cannot send_queue directly on a " +
-        "Kafka Broker Connection. Ignoring request.")
+      let kc = handler._get_client()
+      let name = handler._get_name()
+      kc._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(name +
+          "Cannot send_queue directly on a Kafka Broker Connection." +
+          " This should never happen."),
+          "N/A", -1))
     end
 
   be set_notify(notify: CustomTCPConnectionNotify iso) =>
@@ -207,9 +224,12 @@ trait KafkaBrokerConnection is CustomTCPConnection
     try
       let handler = ((get_handler() as CustomTCPConnectionHandler).notify as
         _KafkaHandler)
-      let logger = handler.get_conf().logger
-      logger(Error) and logger.log(Error, "Cannot set notify directly on a " +
-        "Kafka Broker Connection. Ignoring request.")
+      let kc = handler._get_client()
+      let name = handler._get_name()
+      kc._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(name +
+          "Cannot set_notify directly on a Kafka Broker Connection." +
+          " This should never happen."),
+          "N/A", -1))
     end
 
 

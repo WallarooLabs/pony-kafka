@@ -87,14 +87,13 @@ class Writer
   var _offset: USize = 0
   var _size: USize = 0
 
-  fun ref reserve(size': USize): Writer^ =>
+  fun ref reserve_current(size': USize) =>
     """
-    Reserve space for size additional bytes.
+    Reserve space for size bytes in `_current`.
     """
-    _current.undefined(_current.size() + size')
-    this
+    _check(size')
 
-  fun ref reserve_chunks(size': USize): Writer^ =>
+  fun ref reserve_chunks(size': USize) =>
     """
     Reserve space for size' chunks.
 
@@ -102,29 +101,26 @@ class Writer
     as `done` resets the chunks.
     """
     _chunks.reserve(size')
-    this
 
   fun size(): USize =>
     _size
 
-  fun ref write_byte(data: U8): Writer^ =>
+  fun ref write_byte(data: U8) =>
     """
     Write a byte to the buffer.
     """
     _check(1)
     _byte(data)
-    this
 
-  fun ref write_two_bytes(data: U8, data2: U8): Writer^ =>
+  fun ref write_two_bytes(data: U8, data2: U8) =>
     """
     Write a byte to the buffer.
     """
     _check(2)
     _byte(data)
     _byte(data2)
-    this
 
-  fun ref write_four_bytes(data: U8, data2: U8, data3: U8, data4: U8): Writer^
+  fun ref write_four_bytes(data: U8, data2: U8, data3: U8, data4: U8)
   =>
     """
     Write a byte to the buffer.
@@ -134,10 +130,9 @@ class Writer
     _byte(data2)
     _byte(data3)
     _byte(data4)
-    this
 
   fun ref write_eight_bytes(data: U8, data2: U8, data3: U8, data4: U8
-  , data5: U8, data6: U8, data7: U8, data8: U8): Writer^ =>
+  , data5: U8, data6: U8, data7: U8, data8: U8) =>
     """
     Write a byte to the buffer.
     """
@@ -150,12 +145,11 @@ class Writer
     _byte(data6)
     _byte(data7)
     _byte(data8)
-    this
 
   fun ref write_sixteen_bytes(data: U8, data2: U8, data3: U8, data4: U8
   , data5: U8, data6: U8, data7: U8, data8: U8
   , data9: U8, data10: U8, data11: U8, data12: U8
-  , data13: U8, data14: U8, data15: U8, data16: U8): Writer^ =>
+  , data13: U8, data14: U8, data15: U8, data16: U8) =>
     """
     Write a byte to the buffer.
     """
@@ -176,22 +170,20 @@ class Writer
     _byte(data14)
     _byte(data15)
     _byte(data16)
-    this
 
   // TODO: Ability to overwrite at a previous position (only if that position
   // used to be part of one of our accumulation iso's)
   // TODO: Copy small sized ByteSeq instead to minimize multiple small arrays
   // for IO calls
-  fun ref write(data: ByteSeq): Writer^ =>
+  fun ref write(data: ByteSeq) =>
     """
     Write a ByteSeq to the buffer.
     """
     _append_current()
     _chunks.push(data)
     _size = _size + data.size()
-    this
 
-  fun ref writev(data: ByteSeqIter): Writer^ =>
+  fun ref writev(data: ByteSeqIter) =>
     """
     Write ByteSeqs to the buffer.
     """
@@ -200,7 +192,6 @@ class Writer
       _chunks.push(chunk)
       _size = _size + chunk.size()
     end
-    this
 
   fun ref done(): Array[ByteSeq] iso^ =>
     """

@@ -114,7 +114,7 @@ class _KafkaTopicPartitionState
   var request_timestamp: I64
   var error_code: I16 = 0
   var timestamp: (I64 | None) = None
-  var request_offset: I64 = 0
+  var request_offset: I64 = -1
   var max_bytes: I32
   var paused: Bool = true
   var current_leader: Bool = false
@@ -182,8 +182,10 @@ class _KafkaHandler is CustomTCPConnectionNotify
   let _timers: Timers = Timers
   let _reconnect_closed_delay: U64
   let _reconnect_failed_delay: U64
+  var _num_reconnects_total: U8
+  var _num_reconnects_left: U8
 
-  let _statemachine: Fsm[CustomTCPConnection ref]
+  let _statemachine: Fsm[KafkaBrokerConnection ref]
 
   var send_batch_timer: (Timer tag | None) = None
   var metadata_refresh_timer: (Timer tag | None) = None
@@ -194,18 +196,21 @@ class _KafkaHandler is CustomTCPConnectionNotify
   var _currently_throttled: Bool = false
 
   let _name: String
+  let _rb: IsoReader ref = recover ref IsoReader end
 
   new create(client: KafkaClient, conf: KafkaConfig val,
     topic_consumer_handlers: Map[String, KafkaConsumerMessageHandler val] val,
     connection_broker_id: I32 = -1, reconnect_closed_delay: U64 = 100_000_000,
-    reconnect_failed_delay: U64 = 10_000_000_000)
+    reconnect_failed_delay: U64 = 1_000_000_000, num_reconnects: U8 = 5)
   =>
     _conf = conf
     _kafka_client = client
     _connection_broker_id = connection_broker_id
-    _metadata_only = (connection_broker_id == -1)
+    _metadata_only = (connection_broker_id < 0)
     _reconnect_closed_delay = reconnect_closed_delay
     _reconnect_failed_delay = reconnect_failed_delay
+    _num_reconnects_total = num_reconnects
+    _num_reconnects_left = num_reconnects
 
     _name = _conf.client_name + "#" + _connection_broker_id.string() + ": "
 
@@ -218,7 +223,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
         consumer_handler.clone())
     end
 
-    _statemachine = Fsm[CustomTCPConnection ref](_conf.logger)
+    _statemachine = Fsm[KafkaBrokerConnection ref](_conf.logger)
 
     // simple intialization phase state machine
     try
@@ -233,73 +238,73 @@ class _KafkaHandler is CustomTCPConnectionNotify
       _statemachine.add_allowed_state(_KafkaPhaseUpdateMetadataReconnect)?
 
       _statemachine.valid_transition(FsmStateAny, _KafkaPhaseStart,
-        {ref(old_state: FsmState val, state_machine: Fsm[CustomTCPConnection
-        ref], conn: CustomTCPConnection ref)(kh = this) => None} ref)?
+        {ref(old_state: FsmState val, state_machine: Fsm[KafkaBrokerConnection
+        ref], conn: KafkaBrokerConnection ref)(kh = this) => None} ref)?
 
       _statemachine.valid_transition(FsmStateAny, _KafkaPhaseUpdateApiVersions,
-        {ref(old_state: FsmState val, state_machine: Fsm[CustomTCPConnection
-        ref], conn: CustomTCPConnection ref)(kh = this) =>
-        conn.get_handler().writev(kh.update_broker_api_versions())} ref)?
+        {ref(old_state: FsmState val, state_machine: Fsm[KafkaBrokerConnection
+        ref], conn: KafkaBrokerConnection ref)(kh = this) =>
+        kh._write_to_network(conn, kh.update_broker_api_versions())} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateApiVersions,
         _KafkaPhaseUpdateMetadata, {ref(old_state: FsmState val, state_machine:
-        Fsm[CustomTCPConnection ref], conn: CustomTCPConnection ref)(kh = this)
-        ? => kh.refresh_metadata(conn)?} ref)?
+        Fsm[KafkaBrokerConnection ref], conn: KafkaBrokerConnection ref)(kh = this)
+        => kh.refresh_metadata(conn)} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateApiVersions,
         _KafkaPhaseSkipUpdateApiVersions, {ref(old_state: FsmState val,
-        state_machine: Fsm[CustomTCPConnection ref], conn: CustomTCPConnection
-        ref)(kh = this) ? => kh.set_fallback_api_versions(conn)?} ref)?
+        state_machine: Fsm[KafkaBrokerConnection ref], conn: KafkaBrokerConnection
+        ref)(kh = this) => kh.set_fallback_api_versions(conn)} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseSkipUpdateApiVersions,
         _KafkaPhaseUpdateMetadata, {ref(old_state: FsmState val, state_machine:
-        Fsm[CustomTCPConnection ref], conn: CustomTCPConnection ref)(kh = this)
-        ? => kh.refresh_metadata(conn)?} ref)?
+        Fsm[KafkaBrokerConnection ref], conn: KafkaBrokerConnection ref)(kh = this)
+        => kh.refresh_metadata(conn)} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseStart,
         _KafkaPhaseUpdateMetadata, {ref(old_state: FsmState val, state_machine:
-        Fsm[CustomTCPConnection ref], conn: CustomTCPConnection ref)(kh = this)
-        ? => kh.refresh_metadata(conn)?} ref)?
+        Fsm[KafkaBrokerConnection ref], conn: KafkaBrokerConnection ref)(kh = this)
+        => kh.refresh_metadata(conn)} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateMetadata,
         _KafkaPhaseUpdateOffsets, {ref(old_state: FsmState val, state_machine:
-        Fsm[CustomTCPConnection ref], conn: CustomTCPConnection ref)(kh = this)
-        ? => conn.get_handler().writev(kh.request_offsets()?)} ref)?
+        Fsm[KafkaBrokerConnection ref], conn: KafkaBrokerConnection ref)(kh = this)
+        => kh.refresh_offsets(conn)} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateOffsets, _KafkaPhaseDone,
-        {ref(old_state: FsmState val, state_machine: Fsm[CustomTCPConnection
-        ref], conn: CustomTCPConnection ref)(kh = this) ? =>
-        kh.done_and_consume(conn)?} ref)?
+        {ref(old_state: FsmState val, state_machine: Fsm[KafkaBrokerConnection
+        ref], conn: KafkaBrokerConnection ref)(kh = this) =>
+        kh.done_and_consume(conn)} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseDone,
         _KafkaPhaseUpdateApiVersionsReconnect, {ref(old_state: FsmState val,
-        state_machine: Fsm[CustomTCPConnection ref], conn: CustomTCPConnection
+        state_machine: Fsm[KafkaBrokerConnection ref], conn: KafkaBrokerConnection
         ref)(kh = this) =>
-        conn.get_handler().writev(kh.update_broker_api_versions())} ref)?
+        kh._write_to_network(conn, kh.update_broker_api_versions())} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateApiVersionsReconnect,
         _KafkaPhaseUpdateMetadataReconnect, {ref(old_state: FsmState val,
-        state_machine: Fsm[CustomTCPConnection ref], conn: CustomTCPConnection
-        ref)(kh = this) ? => kh.refresh_metadata(conn)?} ref)?
+        state_machine: Fsm[KafkaBrokerConnection ref], conn: KafkaBrokerConnection
+        ref)(kh = this) => kh.refresh_metadata(conn)} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateApiVersionsReconnect,
         _KafkaPhaseSkipUpdateApiVersionsReconnect, {ref(old_state: FsmState val,
-         state_machine: Fsm[CustomTCPConnection ref], conn: CustomTCPConnection
-        ref)(kh = this) ? => kh.set_fallback_api_versions(conn)?} ref)?
+         state_machine: Fsm[KafkaBrokerConnection ref], conn: KafkaBrokerConnection
+        ref)(kh = this) => kh.set_fallback_api_versions(conn)} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseSkipUpdateApiVersionsReconnect,
         _KafkaPhaseUpdateMetadataReconnect, {ref(old_state: FsmState val,
-        state_machine: Fsm[CustomTCPConnection ref], conn: CustomTCPConnection
-        ref)(kh = this) ? => kh.refresh_metadata(conn)?} ref)?
+        state_machine: Fsm[KafkaBrokerConnection ref], conn: KafkaBrokerConnection
+        ref)(kh = this) => kh.refresh_metadata(conn)} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateMetadataReconnect,
         _KafkaPhaseDone, {ref(old_state: FsmState val, state_machine:
-        Fsm[CustomTCPConnection ref], conn: CustomTCPConnection ref)(kh = this)
-        ? => kh.done_and_consume_reconnect(conn)?} ref)?
+        Fsm[KafkaBrokerConnection ref], conn: KafkaBrokerConnection ref)(kh = this)
+        => kh.done_and_consume_reconnect(conn)} ref)?
 
       _statemachine.initialize(_KafkaPhaseStart, {(old_state: FsmState val,
-        new_state: FsmState val, state_machine: Fsm[CustomTCPConnection ref],
-        data: CustomTCPConnection ref)(kh = this, logger = _conf.logger, name =
+        new_state: FsmState val, state_machine: Fsm[KafkaBrokerConnection ref],
+        data: KafkaBrokerConnection ref)(kh = this, logger = _conf.logger, name =
         _name) => logger(Error) and logger.log(Error, name +
         "Error transitioning states from " + old_state.string() + " to " +
         new_state.string())} ref)?
@@ -307,6 +312,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Error initializing state machine!")
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorInitializingFSM,
+        "N/A", -1))
     end
 
   fun ref _update_consumers(topic_consumers: Map[String, Array[KafkaConsumer
@@ -315,15 +322,19 @@ class _KafkaHandler is CustomTCPConnectionNotify
       try
         _state.topics_state(topic)?.consumers = consumers
       else
-        _conf.logger(Error) and _conf.logger.log(Error, _name +
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
           "Error updating consumers for topic: " + topic +
-          ". This should never happen.")
+          ". This should never happen."),
+          topic, -1))
+        return
       end
     end
 
-  fun get_conf(): KafkaConfig val => _conf
+  fun _get_conf(): KafkaConfig val => _conf
+  fun _get_client(): KafkaClient => _kafka_client
+  fun _get_name(): String => _name
 
-  fun ref done_and_consume(conn: CustomTCPConnection ref) ? =>
+  fun ref done_and_consume(conn: KafkaBrokerConnection ref) =>
     _kafka_client._unthrottle_producers(_connection_broker_id)
     _kafka_client._broker_initialized(_connection_broker_id)
     _conf.logger(Info) and _conf.logger.log(Info, _name +
@@ -333,17 +344,17 @@ class _KafkaHandler is CustomTCPConnectionNotify
     match metadata_refresh_timer
     | None =>
       // start metadata refresh timer
-      let timer = Timer(_KafkaRefreshMetadataTimerNotify((conn as
-        KafkaBrokerConnection)), _conf.refresh_metadata_interval)
+      let timer = Timer(_KafkaRefreshMetadataTimerNotify(conn),
+        _conf.refresh_metadata_interval)
       metadata_refresh_timer = timer
       _timers(consume timer)
     end
 
     if not _all_topics_partitions_paused then
-      consume_messages(conn)?
+      consume_messages(conn)
     end
 
-  fun ref done_and_consume_reconnect(conn: CustomTCPConnection ref) ? =>
+  fun ref done_and_consume_reconnect(conn: KafkaBrokerConnection ref) =>
     _conf.logger(Info) and _conf.logger.log(Info, _name +
       "Done with reconnect and metadata update")
 
@@ -351,14 +362,14 @@ class _KafkaHandler is CustomTCPConnectionNotify
     match metadata_refresh_timer
     | None =>
       // start metadata refresh timer
-      let timer = Timer(_KafkaRefreshMetadataTimerNotify((conn as
-        KafkaBrokerConnection)), _conf.refresh_metadata_interval)
+      let timer = Timer(_KafkaRefreshMetadataTimerNotify(conn),
+        _conf.refresh_metadata_interval)
       metadata_refresh_timer = timer
       _timers(consume timer)
     end
 
     if not _all_topics_partitions_paused then
-      consume_messages(conn)?
+      consume_messages(conn)
     end
 
   fun ref _update_consumer_message_handler(topic: String, consumer_handler:
@@ -367,12 +378,13 @@ class _KafkaHandler is CustomTCPConnectionNotify
     try
       _state.topics_state(topic)?.message_handler = consumer_handler.clone()
     else
-      _conf.logger(Error) and _conf.logger.log(Error, _name +
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
         "Error updating message handler for topic: " + topic +
-        ". This should never happen.")
+        ". This should never happen."),
+        topic, -1))
     end
 
-  fun ref _consumer_pause(conn: CustomTCPConnection ref, topic: String,
+  fun ref _consumer_pause(conn: KafkaBrokerConnection ref, topic: String,
     partition_id: I32)
   =>
     // set to paused
@@ -381,12 +393,13 @@ class _KafkaHandler is CustomTCPConnectionNotify
     try
       _state.topics_state(topic)?.partitions_state(partition_id)?.paused = true
     else
-      _conf.logger(Error) and _conf.logger.log(Error, _name +
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
         "Error pausing consumer for topic: " + topic + " and partition: " +
-        partition_id.string() + ".")
+        partition_id.string() + "."),
+        topic, -1))
     end
 
-  fun ref _consumer_pause_all(conn: CustomTCPConnection ref) =>
+  fun ref _consumer_pause_all(conn: KafkaBrokerConnection ref) =>
     // set all to paused
     for (topic, ts) in _state.topics_state.pairs() do
       for (partition_id, ps) in ts.partitions_state.pairs() do
@@ -394,7 +407,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       end
     end
 
-  fun ref _consumer_resume(conn: CustomTCPConnection ref, topic: String,
+  fun ref _consumer_resume(conn: KafkaBrokerConnection ref, topic: String,
     partition_id: I32) =>
     // set to unpaused
     try
@@ -405,20 +418,16 @@ class _KafkaHandler is CustomTCPConnectionNotify
       // if we're fully initialized and we used to be completely paused
       if (_statemachine.current_state() is _KafkaPhaseDone) and
         (was_totally_paused == true) then
-        try
-          consume_messages(conn)?
-        else
-          _conf.logger(Error) and _conf.logger.log(Error, _name +
-            "error consuming messages in consumer resume.")
-        end
+        consume_messages(conn)
       end
     else
-      _conf.logger(Error) and _conf.logger.log(Error, _name +
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
         "Error resuming consumer for topic: " + topic + " and partition: " +
-        partition_id.string() + ".")
+        partition_id.string() + "."),
+        topic, partition_id))
     end
 
-  fun ref _consumer_resume_all(conn: CustomTCPConnection ref) =>
+  fun ref _consumer_resume_all(conn: KafkaBrokerConnection ref) =>
     let was_totally_paused = _all_topics_partitions_paused = false
 
     // set all to unpaused
@@ -431,14 +440,11 @@ class _KafkaHandler is CustomTCPConnectionNotify
     // if we're fully initialized and we used to be completely paused
     if (_statemachine.current_state() is _KafkaPhaseDone) and
       (was_totally_paused == true) then
-      try
-        consume_messages(conn)?
-      else
-        _conf.logger(Error) and _conf.logger.log(Error, _name +
-          "error consuming messages in consumer resume all.")
-      end
+      consume_messages(conn)
     end
 
+/*
+  // TODO: LIKELY BITROTTED
   fun ref message_consumed(msg: KafkaMessage val, success: Bool) =>
     // What to do if `success` is `false`? Can we do anything meaningful aside
     //  from ensuring that largest offset not successfully consumed is not
@@ -453,11 +459,13 @@ class _KafkaHandler is CustomTCPConnectionNotify
         _state.consumer_unacked_offsets(msg._get_topic_partition())?.unset(msg.
           get_offset())
       else
-        _conf.logger(Error) and _conf.logger.log(Error, _name +
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
           "error removing message from track unacked offset collection. msg: " +
-          msg.string())
+          msg.string()),
+          "N/A", -1))
       end
     end
+*/
 
   fun ref received(conn: CustomTCPConnection ref, data: Array[U8] iso,
     times: USize): Bool
@@ -465,22 +473,51 @@ class _KafkaHandler is CustomTCPConnectionNotify
     let network_received_timestamp: U64 = Time.nanos()
     _conf.logger(Fine) and _conf.logger.log(Fine, _name +
       "Kafka client received " + data.size().string() + " bytes")
+
+    ifdef "enable-kafka-network-sniffing" then
+      match _conf.network_sniffer
+      | let ns: KafkaNetworkSniffer tag =>
+        let copy = recover iso
+          let c: Array[U8] ref = Array[U8]
+          let s = data.size()
+          var i: USize = 0
+          while i < s do
+            try
+              c.push(data(i)?)
+            end
+            i = i + 1
+          end
+          c
+        end
+
+        ns.data_received(_connection_broker_id, consume copy)
+      end
+    end
+
     if _header then
       try
         let payload_size: USize = payload_length(consume data)?
 
         conn.get_handler().expect(payload_size)
         _header = false
+      else
+        // error decoding payload size.. ignore and wait for more data
+        // error already logged in payload_length function
+        conn.get_handler().expect(_header_length)
+        _header = true
       end
       true
     else
-      try
-        decode_response((conn as KafkaBrokerConnection), consume data,
-          network_received_timestamp)?
+      let kconn = try conn as KafkaBrokerConnection
       else
-        _conf.logger(Error) and _conf.logger.log(Error, _name +
-          "Error decoding kafka message")
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name + "Error"
+          + " casting conn to KafkaBrokerConnection. This"
+          + " should never happen."),
+          "N/A", -1))
+        return true
       end
+
+      decode_response(kconn, consume data, network_received_timestamp)
 
       conn.get_handler().expect(_header_length)
       _header = true
@@ -497,6 +534,10 @@ class _KafkaHandler is CustomTCPConnectionNotify
       "Kafka client accepted a connection")
     conn.get_handler().expect(_header_length)
 
+  fun ref before_reconnecting(conn: CustomTCPConnection ref) =>
+    _conf.logger(Warn) and _conf.logger.log(Warn, _name +
+      "Kafka client attempting to reconnect...")
+
   fun ref connecting(conn: CustomTCPConnection ref, count: U32) =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name +
       "Kafka client connecting")
@@ -504,11 +545,14 @@ class _KafkaHandler is CustomTCPConnectionNotify
   fun ref connected(conn: CustomTCPConnection ref) =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name +
       "Kafka client successfully connected")
+    _num_reconnects_left = _num_reconnects_total
     try
-      initialize_connection(conn)?
+      initialize_connection(conn as KafkaBrokerConnection)?
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Error initializing kafka connection")
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorInitilizingConnection,
+        "N/A", -1))
     end
 
   fun ref expect(conn: CustomTCPConnection ref, qty: USize): USize =>
@@ -519,8 +563,25 @@ class _KafkaHandler is CustomTCPConnectionNotify
   fun ref connect_failed(conn: CustomTCPConnection ref) =>
     _conf.logger(Warn) and _conf.logger.log(Warn, _name +
       "Kafka client failed connection")
-    let t = Timer(_ReconnectTimerNotify(conn), _reconnect_failed_delay, 0)
-    _timers(consume t)
+    if _num_reconnects_left > 0 then
+      // TODO: implement backoff retries
+      _conf.logger(Warn) and _conf.logger.log(Warn, _name +
+        "Will attempt to reconnect in " + _reconnect_failed_delay.string() + ". " + _num_reconnects_left.string() + " attempts remaining.")
+      let t = Timer(_ReconnectTimerNotify(conn), _reconnect_failed_delay, 0)
+      _timers(consume t)
+      _num_reconnects_left = _num_reconnects_left - 1
+    else
+      _conf.logger(Warn) and _conf.logger.log(Warn, _name +
+        "No reconnect attempts left. Will not attempt to reconnect.")
+      try
+        _kafka_client._recoverable_error(KafkaErrorReport(ClientErrorNoBrokerConnection(conn as KafkaBrokerConnection),
+          "N/A", -1), true)
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name + "Error"
+          + " casting conn as KafkaBrokerConnection. This should never happen."),
+          "N/A", -1))
+      end
+    end
 
   fun ref auth_failed(conn: CustomTCPConnection ref) =>
     _conf.logger(Warn) and _conf.logger.log(Warn, _name +
@@ -532,30 +593,33 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
     // clean up pending requests since they're invalid now and need to be
     // retried (for produce requests only)
-    try
-      while _requests_buffer.size() > 0 do
-        (let sent_correlation_id, let request_type, let extra_request_data) =
+    while _requests_buffer.size() > 0 do
+      // TODO: double check logic on order this needs to be done in
+      (let sent_correlation_id, let request_type, let extra_request_data) =
+        try
           _requests_buffer.pop()?
-
-        match request_type
-        // if it was a produce request, put it back on the pending buffer
-        | let produce_api: _KafkaProduceApi
-          =>
-            match consume extra_request_data
-               | (let s: I32, let n: U64, let m: Map[String, Map[I32,
-                 Array[ProducerKafkaMessage val]]]) =>
-                 _pending_buffer.unshift((s, n, consume m))
-               else
-                 _conf.logger(Error) and _conf.logger.log(Error, _name + "Error"
-                   + " casting extra_request_data in produce response. This"
-                   + " should never happen.")
-               end
+        else
+          _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+            "Error popping item from requests_buffer. This should never happen."),
+            "N/A", -1))
+          return
         end
-      end
-    else
-      _conf.logger(Error) and _conf.logger.log(Error, _name +
-        "Error cleaning up pending requests. This should never happen.")
 
+      match request_type
+      // if it was a produce request, put it back on the pending buffer
+      | let produce_api: _KafkaProduceApi
+        =>
+          match consume extra_request_data
+          | (let s: I32, let n: U64, let m: Map[String, Map[I32,
+            Array[ProducerKafkaMessage val]]]) =>
+            _pending_buffer.unshift((s, n, consume m))
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name + "Error"
+              + " extra_request_data for produce api in requests_buffer didn't match. This"
+              + " should never happen."),
+              "N/A", -1))
+          end
+      end
     end
 
     // terminate timers
@@ -574,8 +638,25 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
     _kafka_client._throttle_producers(_connection_broker_id)
 
-    let t = Timer(_ReconnectTimerNotify(conn), _reconnect_closed_delay, 0)
-    _timers(consume t)
+    if _num_reconnects_left > 0 then
+      // TODO: implement backoff retries
+      _conf.logger(Warn) and _conf.logger.log(Warn, _name +
+        "Will attempt to reconnect in " + _reconnect_closed_delay.string() + ". " + _num_reconnects_left.string() + " attempts remaining.")
+      let t = Timer(_ReconnectTimerNotify(conn), _reconnect_closed_delay, 0)
+      _timers(consume t)
+      _num_reconnects_left = _num_reconnects_left - 1
+    else
+      _conf.logger(Warn) and _conf.logger.log(Warn, _name +
+        "No reconnect attempts left. Will not attempt to reconnect.")
+      try
+        _kafka_client._recoverable_error(KafkaErrorReport(ClientErrorNoBrokerConnection(conn as KafkaBrokerConnection),
+          "N/A", -1), true)
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name + "Error"
+          + " casting conn as KafkaBrokerConnection. This should never happen."),
+          "N/A", -1))
+      end
+    end
 
   fun ref throttled(conn: CustomTCPConnection ref) =>
     _conf.logger(Info) and _conf.logger.log(Info, _name +
@@ -600,16 +681,20 @@ class _KafkaHandler is CustomTCPConnectionNotify
   fun ref _next_correlation_id(): I32 =>
     _correlation_id = _correlation_id + 1
 
-  fun payload_length(data: Array[U8] val): USize ? =>
-    let rb = recover ref Reader end
-    rb.append(consume data)
+  fun ref payload_length(data: Array[U8] iso): USize ? =>
+    _rb.append(consume data)
     try
-      BigEndianDecoder.i32(rb)?.usize()
+      let n = BigEndianDecoder.i32(_rb)?.usize()
+      _rb.clear()
+      n
     else
+      // throw error so that we can ignore it in `received` and wait for more data
+      _conf.logger(Warn) and _conf.logger.log(Warn, _name +
+        "Error decoding payload_length... Ignoring.")
       error
     end
 
-  fun ref initialize_connection(conn: CustomTCPConnection ref) ? =>
+  fun ref initialize_connection(conn: KafkaBrokerConnection ref) ? =>
     match (_statemachine.current_state(), _api_versions_supported)
     | (_KafkaPhaseUpdateApiVersions, _) =>
       // if we're reconnecting when we had requested ApiVersions, we need to
@@ -644,7 +729,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     end
     conn.get_handler().expect(_header_length)
 
-  fun ref set_fallback_api_versions(conn: CustomTCPConnection ref) ? =>
+  fun ref set_fallback_api_versions(conn: KafkaBrokerConnection ref) =>
     _conf.logger(Warn) and _conf.logger.log(Warn, _name +
       "Got disconnected requesting broker api versions")
     _conf.logger(Warn) and _conf.logger.log(Warn, _name +
@@ -662,13 +747,28 @@ class _KafkaHandler is CustomTCPConnectionNotify
     // Update metadata
     match _statemachine.current_state()
     | _KafkaPhaseSkipUpdateApiVersions =>
-      _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)?
+      try
+        _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)?
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorTransitioningFSMStates(_name +
+          "Error transitioning from " + _statemachine.current_state().string() + " to " + _KafkaPhaseUpdateMetadata.string()),
+          "N/A", -1))
+        return
+      end
     | _KafkaPhaseSkipUpdateApiVersionsReconnect =>
-      _statemachine.transition_to(_KafkaPhaseUpdateMetadataReconnect, conn)?
+      try
+        _statemachine.transition_to(_KafkaPhaseUpdateMetadataReconnect, conn)?
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorTransitioningFSMStates(_name +
+          "Error transitioning from " + _statemachine.current_state().string() + " to " + _KafkaPhaseUpdateMetadataReconnect.string()),
+          "N/A", -1))
+        return
+      end
     else
-      _conf.logger(Error) and _conf.logger.log(Error, _name +
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
         "Error we're in state: " + _statemachine.current_state().string() +
-        " in set_fallback_api_versions. This should never happen.")
+        " in set_fallback_api_versions. This should never happen."),
+        "N/A", -1))
     end
 
 
@@ -698,28 +798,55 @@ class _KafkaHandler is CustomTCPConnectionNotify
   // messages without using the KafkaProducerMapping
   fun ref send_kafka_message(conn: KafkaBrokerConnection ref, topic: String,
     partition_id: I32, msg: ProducerKafkaMessage val, auth: _KafkaProducerAuth)
-    ?
   =>
-    let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())? as
-      _KafkaProduceApi
-    produce_api.combine_and_split_by_message_size_single(_conf, _pending_buffer,
-       topic, partition_id, msg, _state.topics_state)
+    let produce_api = try _broker_apis_to_use(_KafkaProduceV0.api_key())? as
+        _KafkaProduceApi
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+          "Error getting produce api to use. This should never happen."),
+          "N/A", -1))
+        return
+      end
 
-    _maybe_process_pending_buffer(conn)?
+    try
+      produce_api.combine_and_split_by_message_size_single(_conf, _pending_buffer,
+        topic, partition_id, msg, _state.topics_state)?
+    else
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+        "Error in combine_and_split_by_message_size_single. This should never happen."),
+        "N/A", -1))
+      return
+    end
+
+    _maybe_process_pending_buffer(conn)
 
   fun ref send_kafka_messages(conn: KafkaBrokerConnection ref, topic: String,
     msgs: Map[I32, Array[ProducerKafkaMessage val] iso] val, auth:
-    _KafkaProducerAuth) ?
+    _KafkaProducerAuth)
   =>
-    let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())? as
-      _KafkaProduceApi
-    produce_api.combine_and_split_by_message_size(_conf, _pending_buffer, topic,
-       msgs, _state.topics_state)
+    let produce_api = try _broker_apis_to_use(_KafkaProduceV0.api_key())? as
+        _KafkaProduceApi
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+          "Error getting produce api to use. This should never happen."),
+          "N/A", -1))
+        return
+      end
 
-    _maybe_process_pending_buffer(conn)?
+    try
+      produce_api.combine_and_split_by_message_size(_conf, _pending_buffer, topic,
+         msgs, _state.topics_state)?
+    else
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+        "Error in combine_and_split_by_message_size. This should never happen."),
+        "N/A", -1))
+      return
+    end
 
-  fun ref _maybe_process_pending_buffer(conn: KafkaBrokerConnection ref) ? =>
-    (_, let num_msgs, _) = _pending_buffer(0)?
+    _maybe_process_pending_buffer(conn)
+
+  fun ref _maybe_process_pending_buffer(conn: KafkaBrokerConnection ref) =>
+    (_, let num_msgs, _) = try _pending_buffer(0)? else return end
     if num_msgs == 0 then
       return
     end
@@ -732,7 +859,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       if _pending_buffer.size() > 1 then
         // send everything but last buffer entry since it almost definitely has
         // room for more data to accumulate
-        process_pending_buffer(conn, true)?
+        process_pending_buffer(conn, true)
 
         // cancel and recreate timer for remaining messages to be sent
         _timers.cancel(t)
@@ -744,7 +871,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
         // check if we've reached max_produce_buffer_messages or not
         if num_msgs >= _conf.max_produce_buffer_messages then
           // send all messages
-          process_pending_buffer(conn)?
+          process_pending_buffer(conn)
 
           // cancel timer because we're sending all messages now
           _timers.cancel(t)
@@ -762,18 +889,18 @@ class _KafkaHandler is CustomTCPConnectionNotify
         _timers(consume timer)
       else
         // if no, send messages
-        process_pending_buffer(conn)?
+        process_pending_buffer(conn)
       end
     end
 
-  fun ref _send_pending_messages(conn: CustomTCPConnection ref) ? =>
+  fun ref _send_pending_messages(conn: KafkaBrokerConnection ref) =>
     send_batch_timer = None
-    process_pending_buffer(conn)?
+    process_pending_buffer(conn)
 
-  fun ref process_pending_buffer(conn: CustomTCPConnection ref,
-    send_all_but_one: Bool = false) ?
+  fun ref process_pending_buffer(conn: KafkaBrokerConnection ref,
+    send_all_but_one: Bool = false)
   =>
-    (_, let n, _) = _pending_buffer(0)?
+    (_, let n, _) = try _pending_buffer(0)? else return end
     if n == 0 then
       return
     end
@@ -782,9 +909,19 @@ class _KafkaHandler is CustomTCPConnectionNotify
     while (_requests_buffer.size() < _conf.max_inflight_requests) and
       (_pending_buffer.size() > limit) do
       // TODO: Figure out a way to avoid shift... maybe use a ring buffer?
-      (let size, let num_msgs, let msgs) = _pending_buffer.shift()?
+      (let size, let num_msgs, let msgs) = try _pending_buffer.shift()?
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+              "Error shifting _pending_buffer. This should never happen."),
+              "N/A", -1))
+            return
+          end
 
-      conn.get_handler().writev(produce_messages(size, num_msgs, consume msgs)?)
+      let produce_request = produce_messages(size, num_msgs, consume msgs)
+      match consume produce_request
+      | let pr: Array[ByteSeq] val =>
+        _write_to_network(conn, consume pr)
+      end
     end
     if _pending_buffer.size() == 0 then
       // initialize pending buffer
@@ -792,12 +929,30 @@ class _KafkaHandler is CustomTCPConnectionNotify
         Array[ProducerKafkaMessage val]]]))
     end
 
+  fun box _write_to_network(conn: KafkaBrokerConnection ref, data: ByteSeqIter) =>
+    conn.get_handler().writev(data)
+
+    ifdef "enable-kafka-network-sniffing" then
+      match _conf.network_sniffer
+      | let ns: KafkaNetworkSniffer tag =>
+        ns.data_sent(_connection_broker_id, data)
+      end
+    end
+
+
   fun ref produce_messages(size: I32, num_msgs: U64, msgs: Map[String, Map[I32,
-    Array[ProducerKafkaMessage val]]]): Array[ByteSeq] iso^ ?
+    Array[ProducerKafkaMessage val]]]): (Array[ByteSeq] val | None)
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name + "producing messages")
-    let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())? as
-      _KafkaProduceApi
+    let produce_api = try _broker_apis_to_use(_KafkaProduceV0.api_key())? as
+        _KafkaProduceApi
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+          "Error getting produce api to use. This should never happen."),
+          "N/A", -1))
+        return
+      end
+
     let correlation_id = _next_correlation_id()
 
     // Don't store in _requests_buffer for produce requests which don't get a
@@ -826,27 +981,39 @@ class _KafkaHandler is CustomTCPConnectionNotify
     encoded_msg
 
   // try and fetch messages from kafka
-  fun ref consume_messages(conn: CustomTCPConnection ref) ? =>
+  fun ref consume_messages(conn: KafkaBrokerConnection ref) =>
     if(_conf.consumer_topics.size() > 0) then
-      let fetch_request = fetch_messages()?
+      let fetch_request = fetch_messages()
       match consume fetch_request
       | let fr: Array[ByteSeq] iso =>
-        conn.get_handler().writev(consume fr)
+        _write_to_network(conn, consume fr)
       else
         // there are no topics/partitiions to fetch data for that are unpaused
         _all_topics_partitions_paused = true
       end
     end
 
-  fun ref fetch_messages(): (Array[ByteSeq] iso^ | None) ?
-  =>
+  fun ref fetch_messages(): (Array[ByteSeq] iso^ | None) =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name + "fetching messages")
-    let fetch_api = _broker_apis_to_use(_KafkaFetchV0.api_key())? as
-      _KafkaFetchApi
+    let fetch_api = try _broker_apis_to_use(_KafkaFetchV0.api_key())? as
+        _KafkaFetchApi
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+          "Error getting fetch api to use. This should never happen."),
+          "N/A", -1))
+        return None
+      end
+
     let correlation_id = _next_correlation_id()
 
-    _requests_buffer.push((correlation_id, fetch_api, None))
-    fetch_api.encode_request(correlation_id, _conf, _state.topics_state)
+    let fetch_request = fetch_api.encode_request(correlation_id, _conf, _state.topics_state)
+
+    // only add correlation id to requests buffer if there was actually a fetch request
+    if fetch_request isnt None then
+      _requests_buffer.push((correlation_id, fetch_api, None))
+    end
+
+    consume fetch_request
 
   // update brokers list based on what main kafka client actor knows
   fun ref update_brokers_list(brokers_list: Map[I32, (_KafkaBroker val,
@@ -863,7 +1030,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     _requests_buffer.push((correlation_id, _KafkaApiVersionsV0, None))
     _KafkaApiVersionsV0.encode_request(correlation_id, _conf)
 
-  fun ref refresh_metadata(conn: CustomTCPConnection ref) ? =>
+  fun ref refresh_metadata(conn: KafkaBrokerConnection ref) =>
     // don't request updated metadata if we already have an outstanding request
     if not metadata_refresh_request_outstanding then
       // cancel any outstanding timer for metadata refresh
@@ -875,263 +1042,373 @@ class _KafkaHandler is CustomTCPConnectionNotify
       end
 
       metadata_refresh_request_outstanding = true
-      conn.get_handler().writev(request_metadata()?)
+
+      let metadata_request = request_metadata()
+      match consume metadata_request
+      | let mr: Array[ByteSeq] iso =>
+        _write_to_network(conn, consume mr)
+      end
     end
 
-  fun ref request_metadata(): Array[ByteSeq] iso^ ?
+  fun ref request_metadata(): (Array[ByteSeq] iso^ | None)
   =>
+    let metadata_api = try _broker_apis_to_use(_KafkaMetadataV0.api_key())? as
+        _KafkaMetadataApi
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+          "Error getting metadata api to use. This should never happen."),
+          "N/A", -1))
+        return None
+      end
+
     let correlation_id = _next_correlation_id()
-    let metadata_api = _broker_apis_to_use(_KafkaMetadataV0.api_key())? as
-      _KafkaMetadataApi
 
     _requests_buffer.push((correlation_id, metadata_api, None))
     metadata_api.encode_request(correlation_id, _conf)
 
-  fun ref request_offsets(): Array[ByteSeq] iso^ ?
+  fun ref refresh_offsets(conn: KafkaBrokerConnection ref) =>
+    let offsets_request = request_offsets()
+    match consume offsets_request
+    | let ofr: Array[ByteSeq] iso =>
+      _write_to_network(conn, consume ofr)
+    end
+
+  fun ref request_offsets(): (Array[ByteSeq] iso^ | None)
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name + "Requesting offsets")
-    let offsets_api = _broker_apis_to_use(_KafkaOffsetsV0.api_key())? as
-      _KafkaOffsetsApi
+    let offsets_api = try _broker_apis_to_use(_KafkaOffsetsV0.api_key())? as
+        _KafkaOffsetsApi
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+          "Error getting offsets api to use. This should never happen."),
+          "N/A", -1))
+        return None
+      end
+
     let correlation_id = _next_correlation_id()
 
     _requests_buffer.push((correlation_id, offsets_api, None))
     offsets_api.encode_request(correlation_id, _conf, _state.topics_state)
 
   // update internal state using metadata received
-  fun ref _update_metadata(meta: _KafkaMetadata val, conn: CustomTCPConnection
+  fun ref _update_metadata(meta: _KafkaMetadata val, conn: KafkaBrokerConnection
     ref)
   =>
-    try
-      var new_partition_added: Bool = false
-      for topic_meta in meta.topics_metadata.values() do
-        let topic = topic_meta.topic
-        let topic_state = try _state.topics_state(topic)?
+    var new_partition_added: Bool = false
+    var have_valid_partition: Bool = false
+    for topic_meta in meta.topics_metadata.values() do
+      let topic = topic_meta.topic
+      let topic_state = try _state.topics_state(topic)?
+        else
+          _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+            "Unable to get topic state for topic: " + topic +
+            "! This should never happen."),
+            topic, -1))
+          return
+        end
+
+      // TODO: add error handling for invalid topics and other possible errors
+      let kafka_topic_error = MapKafkaError(_conf.logger, topic_meta.topic_error_code)
+      match kafka_topic_error
+      | ErrorNone => None
+      | ErrorLeaderNotAvailable =>
+        // refresh metadata if connection is ready for that
+        match _statemachine.current_state()
+        | _KafkaPhaseStart |
+          _KafkaPhaseUpdateApiVersions |
+          _KafkaPhaseSkipUpdateApiVersions
+        => None
+        else
+          // safe to force a refresh of metadata
+          refresh_metadata(conn)
+        end
+      else
+        // fall through for ErrorUnknownTopicOrPartition, ErrorInvalidTopicException and ErrorTopicAuthorizationFailed
+        // and anything else if it happens
+        _conf.logger(Error) and _conf.logger.log(Error, _name +
+          "Encountered topic error for topic: " + topic +
+          "! Error: " + kafka_topic_error.string())
+        _kafka_client._unrecoverable_error(KafkaErrorReport(kafka_topic_error,
+          topic, -1))
+      end
+
+      topic_state.topic_error_code = topic_meta.topic_error_code
+      topic_state.is_internal = topic_meta.is_internal
+
+      for part_meta in topic_meta.partitions_metadata.values() do
+        let partition_id = part_meta.partition_id
+        let part_state =
+          try
+            topic_state.partitions_state(partition_id)?
           else
-            _conf.logger(Error) and _conf.logger.log(Error, _name +
-              "Unable to get topic state for topic: " + topic +
-              "! This should never happen.")
-            // TODO: replace this error (and other similar ones) with a request
-            // to kafka client to shut down and let manager know (i.e. fail
-            // fast)
-            error
+            new_partition_added = true
+
+            let ps = _KafkaTopicPartitionState(part_meta.partition_error_code,
+              partition_id, part_meta.leader, part_meta.replicas,
+              part_meta.isrs, part_meta.request_timestamp,
+              _conf.partition_fetch_max_bytes)
+            topic_state.partitions_state(partition_id) = ps
+            ps
           end
 
-        // TODO: add error handling for invalid topics and other possible errors
-        let kafka_topic_error = map_kafka_error(topic_meta.topic_error_code)
-        match kafka_topic_error
+        // have at least one valid partition to get offsets for
+        have_valid_partition = true
+
+        // TODO: add error handling for partition errors
+        let kafka_partition_error =
+          MapKafkaError(_conf.logger, part_meta.partition_error_code)
+        match kafka_partition_error
         | ErrorNone => None
+        | ErrorLeaderNotAvailable =>
+          // refresh metadata if connection is ready for that
+          match _statemachine.current_state()
+          | _KafkaPhaseStart |
+            _KafkaPhaseUpdateApiVersions |
+            _KafkaPhaseSkipUpdateApiVersions
+          => None
+          else
+            // safe to force a refresh of metadata
+            refresh_metadata(conn)
+          end
         else
           _conf.logger(Error) and _conf.logger.log(Error, _name +
             "Encountered topic error for topic: " + topic +
-            "! Error: " + kafka_topic_error.string())
-          _kafka_client._unrecoverable_error(KafkaErrorReport(kafka_topic_error,
-            topic, -1))
+            ", partition: " + partition_id.string() + "! Error: "
+            + kafka_partition_error.string())
+          _kafka_client._unrecoverable_error(KafkaErrorReport(
+            kafka_partition_error, topic, partition_id))
         end
 
-        topic_state.topic_error_code = topic_meta.topic_error_code
-        topic_state.is_internal = topic_meta.is_internal
+        part_state.partition_error_code = part_meta.partition_error_code
+        part_state.leader = part_meta.leader
+        part_state.replicas = part_meta.replicas
+        part_state.isrs = part_meta.isrs
+        part_state.request_timestamp = part_meta.request_timestamp
 
-        for part_meta in topic_meta.partitions_metadata.values() do
-          let partition_id = part_meta.partition_id
-          let part_state =
-            try
-              topic_state.partitions_state(partition_id)?
-            else
-              new_partition_added = true
+        if part_meta.leader == _connection_broker_id then
+          part_state.current_leader = true
+        elseif (part_meta.leader == -1) and
+          (part_state.current_leader == true) then
+          // we used to be the current leader and kafka just indicated that
+          // there is no longer a leader for this partition so we're now
+          // in a leader change
+          part_state.current_leader = false
+          part_state.leader_change = true
 
-              let ps = _KafkaTopicPartitionState(part_meta.partition_error_code,
-                partition_id, part_meta.leader, part_meta.replicas,
-                part_meta.isrs, part_meta.request_timestamp,
-                _conf.partition_fetch_max_bytes)
-              topic_state.partitions_state(partition_id) = ps
-              ps
-            end
-          // TODO: add error handling for partition errors
-          let kafka_partition_error =
-            map_kafka_error(part_meta.partition_error_code)
-          match kafka_partition_error
-          | ErrorNone => None
-          else
-            _conf.logger(Error) and _conf.logger.log(Error, _name +
-              "Encountered topic error for topic: " + topic +
-              ", partition: " + partition_id.string() + "! Error: "
-              + kafka_partition_error.string())
-            _kafka_client._unrecoverable_error(KafkaErrorReport(
-              kafka_partition_error, topic, partition_id))
-          end
+          // take anything from _pending_buffer for this partition and put
+          // it in a separate place until leader change is done
+          // _requests_buffer will be handled as responses come back from
+          // kafka broker
+          // TODO: Tell kafka client to throttle
+          // TODO: Have broker automagically pause fetch requests for this
+          // partition
+          // TODO: implement brokers to always be paused for fetching requests
+          // for partitions they're not leader for; if they become a new
+          // leader and it's not a new partition altogether, must wait for
+          // handoff from old leader before fetching
+          handle_partition_leader_change_pending_buffer(topic, partition_id,
+            part_state)
+        else
+          part_state.current_leader = false
+        end
 
-          part_state.partition_error_code = part_meta.partition_error_code
-          part_state.leader = part_meta.leader
-          part_state.replicas = part_meta.replicas
-          part_state.isrs = part_meta.isrs
-          part_state.request_timestamp = part_meta.request_timestamp
+        // Due to kafka brokers processing requests sequentially there is no
+        // need to worry about there being outstanding produce requests for
+        // a partition that haven't been accounted for as part of
+        // `part_state.leader_change_sent_messages`.
+        if part_state.leader_change then
+          if part_state.current_leader then
+            // The leader didn't actually end up changing
 
-          if part_meta.leader == _connection_broker_id then
-            part_state.current_leader = true
-          elseif (part_meta.leader == -1) and
-            (part_state.current_leader == true) then
-            // we used to be the current leader and kafka just indicated that
-            // there is no longer a leader for this partition so we're now
-            // in a leader change
-            part_state.current_leader = false
-            part_state.leader_change = true
+            // Make sure we don't think we're still changing leaders any
+            // longer
+            // TODO: Tell kafka client to unthrottle
+            part_state.leader_change = false
 
-            // take anything from _pending_buffer for this partition and put
-            // it in a separate place until leader change is done
-            // _requests_buffer will be handled as responses come back from
-            // kafka broker
-            // TODO: Tell kafka client to throttle
-            // TODO: Have broker automagically pause fetch requests for this
-            // partition
-            // TODO: implement brokers to always be paused for fetching requests
-            // for partitions they're not leader for; if they become a new
-            // leader and it's not a new partition altogether, must wait for
-            // handoff from old leader before fetching
-            handle_partition_leader_change_pending_buffer(topic, partition_id,
-              part_state)
-          else
-            part_state.current_leader = false
-          end
-
-          // Due to kafka brokers processing requests sequentially there is no
-          // need to worry about there being outstanding produce requests for
-          // a partition that haven't been accounted for as part of
-          // `part_state.leader_change_sent_messages`.
-          if part_state.leader_change then
-            if part_state.current_leader then
-              // The leader didn't actually end up changing
-
-              // Make sure we don't think we're still changing leaders any
-              // longer
-              // TODO: Tell kafka client to unthrottle
-              part_state.leader_change = false
-
-              if (part_state.leader_change_sent_messages.size() > 0) or
-                (part_state.leader_change_pending_messages.size() > 0) then
-                // Put `part_state.leader_change_sent_messages` and
-                // `part_state.leader_change_pending_messages` back into
-                // _pending_buffer
-                let lcsm = part_state.leader_change_sent_messages =
-                  part_state.leader_change_sent_messages.create()
-                let lcpm = part_state.leader_change_pending_messages =
-                  part_state.leader_change_pending_messages.create()
-                let partition_msgs = recover iso
-                    Map[I32, Array[ProducerKafkaMessage val] iso]
-                  end
-                let lc_msgs = recover iso Array[ProducerKafkaMessage val] end
-                for m in lcsm.values() do
-                  lc_msgs.push(m)
+            if (part_state.leader_change_sent_messages.size() > 0) or
+              (part_state.leader_change_pending_messages.size() > 0) then
+              // Put `part_state.leader_change_sent_messages` and
+              // `part_state.leader_change_pending_messages` back into
+              // _pending_buffer
+              let lcsm = part_state.leader_change_sent_messages =
+                part_state.leader_change_sent_messages.create()
+              let lcpm = part_state.leader_change_pending_messages =
+                part_state.leader_change_pending_messages.create()
+              let partition_msgs = recover iso
+                  Map[I32, Array[ProducerKafkaMessage val] iso]
                 end
-                for m in lcpm.values() do
-                  lc_msgs.push(m)
-                end
-                partition_msgs(partition_id) = consume lc_msgs
-                let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())?
+              let lc_msgs = recover iso Array[ProducerKafkaMessage val] end
+              for m in lcsm.values() do
+                lc_msgs.push(m)
+              end
+              for m in lcpm.values() do
+                lc_msgs.push(m)
+              end
+              partition_msgs(partition_id) = consume lc_msgs
+              let produce_api = try _broker_apis_to_use(_KafkaProduceV0.api_key())?
                   as _KafkaProduceApi
+                else
+                  _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+                    "Unable to get produce api from _broker_apis_to_use!" +
+                    " This should never happen."),
+                    topic, partition_id))
+                  return
+                end
+
+              try
                 produce_api.combine_and_split_by_message_size(_conf,
                   _pending_buffer, topic, consume val partition_msgs
-                  , _state.topics_state)
+                  , _state.topics_state)?
+              else
+                _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+                  "Error in combine_and_split_by_message_size. This should never happen."),
+                  "N/A", -1))
+                return
               end
-            else
-              // The leader did actually end up changing to a different broker
+            end
+          else
+            // The leader did actually end up changing to a different broker
 
-              // Make sure we don't think we're still changing leaders any
-              // longer
-              part_state.leader_change = false
+            // Make sure we don't think we're still changing leaders any
+            // longer
+            part_state.leader_change = false
 
-              if (part_state.leader_change_sent_messages.size() > 0) or
-                (part_state.leader_change_pending_messages.size() > 0) then
-                // Send `part_state.leader_change_sent_messages` and
-                // `part_state.leader_change_pending_messages` to new broker
-                let lcsm = part_state.leader_change_sent_messages =
-                  part_state.leader_change_sent_messages.create()
-                let lcpm = part_state.leader_change_pending_messages =
-                  part_state.leader_change_pending_messages.create()
-                let partition_msgs = recover iso
-                    Map[I32, Array[ProducerKafkaMessage val] iso]
-                  end
-                let lc_msgs = recover iso Array[ProducerKafkaMessage val] end
-                for m in lcsm.values() do
-                  lc_msgs.push(m)
+            if (part_state.leader_change_sent_messages.size() > 0) or
+              (part_state.leader_change_pending_messages.size() > 0) then
+              // Send `part_state.leader_change_sent_messages` and
+              // `part_state.leader_change_pending_messages` to new broker
+              let lcsm = part_state.leader_change_sent_messages =
+                part_state.leader_change_sent_messages.create()
+              let lcpm = part_state.leader_change_pending_messages =
+                part_state.leader_change_pending_messages.create()
+              let partition_msgs = recover iso
+                  Map[I32, Array[ProducerKafkaMessage val] iso]
                 end
-                for m in lcpm.values() do
-                  lc_msgs.push(m)
-                end
-                partition_msgs(partition_id) = consume lc_msgs
-
-                (_, let new_leader_broker_tag) = _brokers(part_state.leader)?
-
-                // send messages over to other broker
-                // TODO: Implement logic to send fetch offsets so new leader
-                // can pick up where this one leaves off for fetching
-                new_leader_broker_tag._leader_change_msgs(meta, topic,
-                  consume val partition_msgs)
+              let lc_msgs = recover iso Array[ProducerKafkaMessage val] end
+              for m in lcsm.values() do
+                lc_msgs.push(m)
               end
+              for m in lcpm.values() do
+                lc_msgs.push(m)
+              end
+              partition_msgs(partition_id) = consume lc_msgs
+
+              (_, let new_leader_broker_tag) = try _brokers(part_state.leader)?
+                    else
+                      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+                        "Unable to get broker for partition leader! This should never happen."),
+                        "N/A", -1))
+                      return
+                    end
+
+              // send messages over to other broker
+              // TODO: Implement logic to send fetch offsets so new leader
+              // can pick up where this one leaves off for fetching
+              new_leader_broker_tag._leader_change_msgs(meta, topic,
+                consume val partition_msgs)
             end
           end
         end
       end
-
-      // if not currently throttled and new partition added
-      // let kafka client know it should be unthrottled
-      if new_partition_added and (not _currently_throttled) then
-        _kafka_client._unthrottle_producers(_connection_broker_id)
-      end
-    else
-      _conf.logger(Error) and _conf.logger.log(Error, _name +
-        "Unable to get topic state! This should never happen.")
     end
 
     // transition to updating offsets if needed
     match _statemachine.current_state()
     | _KafkaPhaseUpdateMetadata =>
-      try
-        _statemachine.transition_to(_KafkaPhaseUpdateOffsets, conn)?
-      else
-        _conf.logger(Error) and _conf.logger.log(Error, _name + "Unable to " +
-          "transition to _KafkaPhaseUpdateOffsets. This should never happen.")
+      if new_partition_added or have_valid_partition then
+        try
+          _statemachine.transition_to(_KafkaPhaseUpdateOffsets, conn)?
+        else
+          _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorTransitioningFSMStates(_name +
+            "Error transitioning from " + _statemachine.current_state().string() + " to " + _KafkaPhaseUpdateOffsets.string()),
+            "N/A", -1))
+          return
+        end
       end
     | _KafkaPhaseUpdateMetadataReconnect =>
       try
         _statemachine.transition_to(_KafkaPhaseDone, conn)?
       else
-        _conf.logger(Error) and _conf.logger.log(Error, _name + "Unable to " +
-          "transition to _KafkaPhaseDone. This should never happen.")
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorTransitioningFSMStates(_name +
+          "Error transitioning from " + _statemachine.current_state().string() + " to " + _KafkaPhaseDone.string()),
+          "N/A", -1))
+        return
+      end
+    | _KafkaPhaseDone =>
+      if new_partition_added then
+        // refresh offsets if we have a new partition added
+        refresh_offsets(conn)
       end
     end
 
   fun ref _leader_change_msgs(meta: _KafkaMetadata val, topic: String,
     msgs: Map[I32, Array[ProducerKafkaMessage val] iso] val,
-    conn: CustomTCPConnection ref)
+    conn: KafkaBrokerConnection ref)
   =>
     // Make sure our metadata is up to date on latest leader info
     _update_metadata(meta, conn)
 
     // TODO: Tell kafka client to unthrottle
     // add new messages to pending buffer for next send opportunity
-    try
-      let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())? as
+    let produce_api = try _broker_apis_to_use(_KafkaProduceV0.api_key())? as
         _KafkaProduceApi
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+          "Unable to get produce api from _broker_apis_to_use!" +
+          " This should never happen."),
+          topic, -1))
+          return
+      end
+
+    try
       produce_api.combine_and_split_by_message_size(_conf, _pending_buffer,
-        topic, msgs, _state.topics_state)
+        topic, msgs, _state.topics_state) ?
     else
-      _conf.logger(Error) and _conf.logger.log(Error, _name +
-        "Unable to get produce api from _broker_apis_to_use!" +
-        " This should never happen.")
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+        "Error in combine_and_split_by_message_size. This should never happen."),
+        "N/A", -1))
+        return
     end
 
 
   // update state based on which offsets kafka says are available
-  fun ref update_offsets(offsets: Array[_KafkaTopicOffset]) ?
+  fun ref update_offsets(offsets: Array[_KafkaTopicOffset])
   =>
     for topic in offsets.values() do
       for part in topic.partitions_offset.values() do
-        _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
-          .request_offset = part.offset
-        _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
-          .error_code = part.error_code
-        _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
-          .timestamp = part.timestamp
+        // TODO: add error handling for partition errors
+        let kafka_partition_error =
+          MapKafkaError(_conf.logger, part.error_code)
+        match kafka_partition_error
+        | ErrorNone => None
+        // assume transient/ignorable for now because update metadata should have caught these
+        | ErrorUnknownTopicOrPartition | ErrorNotLeaderForPartition => None
+        else
+          _conf.logger(Error) and _conf.logger.log(Error, _name +
+            "Encountered topic error for topic: " + topic.topic +
+            ", partition: " + part.partition_id.string() + "! Error: "
+            + kafka_partition_error.string())
+          _kafka_client._unrecoverable_error(KafkaErrorReport(
+            kafka_partition_error, topic.topic, part.partition_id))
+          return
+        end
+
+        try
+          _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
+            .error_code = part.error_code
+          if _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
+            .request_offset == -1 then
+            _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
+              .request_offset = part.offset
+            _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
+              .timestamp = part.timestamp
+          end
+        else
+          _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+            "Error getting state for topic/partition."),
+            topic.topic, part.partition_id))
+          return
+        end
       end
     end
 
@@ -1179,14 +1456,14 @@ class _KafkaHandler is CustomTCPConnectionNotify
 // * is this needed if we throttle due to network congestion?
 
   fun ref _leader_change_throttle_ack(topics_to_throttle: Map[String, Set[I32]
-    iso] val, conn: CustomTCPConnection ref)
+    iso] val, conn: KafkaBrokerConnection ref)
   =>
     // TODO: implement throttle ack and send state over to new leader logic
     None
 
   fun ref process_produce_response(produce_response: Map[String,
     _KafkaTopicProduceResponse], throttle_time: I32, msgs: Map[String, Map[I32,
-    Array[ProducerKafkaMessage val]]], conn: KafkaBrokerConnection ref) ?
+    Array[ProducerKafkaMessage val]]], conn: KafkaBrokerConnection ref)
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name +
       "processing produce response and sending delivery reports.")
@@ -1195,50 +1472,76 @@ class _KafkaHandler is CustomTCPConnectionNotify
     let topics_to_throttle: Map[String, Set[I32] iso] iso =
       recover topics_to_throttle.create() end
     for (topic, topic_response) in produce_response.pairs() do
-      let topic_state = _state.topics_state(topic)?
-      let topic_msgs = msgs(topic)?
-      for (part, part_response) in topic_response.partition_responses.pairs() do
-        let kafka_error = map_kafka_error(part_response.error_code)
-        let partition_msgs = topic_msgs(part)?
-        let part_state = topic_state.partitions_state(part)?
-        try
-          match kafka_error
-          | ErrorNone =>
-            for (i, m) in partition_msgs.pairs() do
-              m._send_delivery_report(KafkaProducerDeliveryReport(kafka_error,
-                topic, part, part_response.offset + i.i64(),
-                part_response.timestamp, m.get_opaque()))
-            end
-          | ErrorLeaderNotAvailable | ErrorNotLeaderForPartition |
-              ErrorUnknownTopicOrPartition
-            =>
-            // ErrorUnknownTopicOrPartition should only happen if a partition
-            // was deleted; treat as transient and retry just in case; if it is
-            // permanent, will fail after max retries.
-            // TODO: implement max retries
-            // TODO: Have broker automagically pause fetch requests for this
-            // partition
-            if not topics_to_throttle.contains(topic) then
-              topics_to_throttle(topic) = recover Set[I32] end
-            end
-            topics_to_throttle(topic)?.set(part)
-            handle_partition_leader_change(conn,
-              kafka_error, topic, part, partition_msgs, part_state)
+      let topic_state = try _state.topics_state(topic)?
           else
-            _conf.logger(Error) and _conf.logger.log(Error, _name +
-              "Received unexpected error for topic: " + topic +
-              " and partition: " + part.string() + " error: " +
-              kafka_error.string())
-            for (i, m) in partition_msgs.pairs() do
-              m._send_delivery_report(KafkaProducerDeliveryReport(kafka_error,
-                topic, part, part_response.offset + i.i64(),
-                part_response.timestamp, m.get_opaque()))
-            end
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+              "Unable to get topics_state for topic: " + topic + "!"),
+            topic, -1))
+            return
           end
+      let topic_msgs = try msgs(topic)?
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+              "Unable to get msgs for topic: " + topic + "!"),
+            topic, -1))
+            return
+          end
+      for (part, part_response) in topic_response.partition_responses.pairs() do
+        let kafka_error = MapKafkaError(_conf.logger, part_response.error_code)
+        let partition_msgs = try topic_msgs(part)?
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+              "Unable to get msgs for topic: " + topic + " and partition: " + part.string() + "!"),
+            topic, part))
+            return
+          end
+        let part_state = try topic_state.partitions_state(part)?
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+              "Unable to get partition state for topic: " + topic + " and partition: " + part.string() + "!"),
+            topic, part))
+            return
+          end
+        match kafka_error
+        | ErrorNone =>
+          for (i, m) in partition_msgs.pairs() do
+            m._send_delivery_report(KafkaProducerDeliveryReport(kafka_error,
+              topic, part, part_response.offset + i.i64(),
+              part_response.timestamp, m.get_opaque()))
+          end
+        | ErrorLeaderNotAvailable | ErrorNotLeaderForPartition |
+            ErrorUnknownTopicOrPartition
+          =>
+          // ErrorUnknownTopicOrPartition should only happen if a partition
+          // was deleted; treat as transient and retry just in case; if it is
+          // permanent, will fail after max retries.
+          // TODO: implement max retries
+          // broker will automagically pause fetch requests for this
+          // partition because leader will be set to -1
+          if not topics_to_throttle.contains(topic) then
+            topics_to_throttle(topic) = recover Set[I32] end
+          end
+          try
+            topics_to_throttle(topic)?.set(part)
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+              "Unable to set topics_to_throttle for topic: " + topic +
+              " and partition: " + part.string() + "!"),
+            topic, part))
+            return
+          end
+          handle_partition_leader_change(conn,
+            kafka_error, topic, part, partition_msgs, part_state)
         else
-            _conf.logger(Error) and _conf.logger.log(Error, _name +
-              "Unable to send message delivery report for topic: " + topic +
-              " and partition: " + part.string() + "!")
+          _conf.logger(Error) and _conf.logger.log(Error, _name +
+            "Received unexpected error for topic: " + topic +
+            " and partition: " + part.string() + " error: " +
+            kafka_error.string())
+          for (i, m) in partition_msgs.pairs() do
+            m._send_delivery_report(KafkaProducerDeliveryReport(kafka_error,
+              topic, part, part_response.offset + i.i64(),
+              part_response.timestamp, m.get_opaque()))
+          end
         end
       end
     end
@@ -1248,7 +1551,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       _conf.logger(Fine) and _conf.logger.log(Fine, _name +
         "Encountered at least one leader change error. Refreshing metadata and
         throttling producers.")
-      refresh_metadata(conn)?
+      refresh_metadata(conn)
       _kafka_client._leader_change_throttle(consume val topics_to_throttle,
         _connection_broker_id)
     end
@@ -1260,8 +1563,10 @@ class _KafkaHandler is CustomTCPConnectionNotify
   =>
     // save messages to retry later; the rest of the messages in
     // _requests_buffer will eventually accumulate here
-    let lcsm = partition_state.leader_change_sent_messages
-    msgs.copy_to(lcsm, 0, lcsm.size(), msgs.size())
+    if msgs.size() > 0 then
+      let lcsm = partition_state.leader_change_sent_messages
+      msgs.copy_to(lcsm, 0, lcsm.size(), msgs.size())
+    end
 
     handle_partition_leader_change_pending_buffer(topic, partition_id,
         partition_state)
@@ -1304,119 +1609,141 @@ class _KafkaHandler is CustomTCPConnectionNotify
       end
     end
 
-  fun map_kafka_error(error_code: I16): KafkaError =>
-    match (error_code)
-    | ErrorNone() => ErrorNone
-    | ErrorUnknown() => ErrorUnknown
-    | ErrorOffsetOutOfRange() => ErrorOffsetOutOfRange
-    | ErrorCorruptMessage() => ErrorCorruptMessage
-    | ErrorUnknownTopicOrPartition() => ErrorUnknownTopicOrPartition
-    | ErrorInvalidFetchSize() => ErrorInvalidFetchSize
-    | ErrorLeaderNotAvailable() => ErrorLeaderNotAvailable
-    | ErrorNotLeaderForPartition() => ErrorNotLeaderForPartition
-    | ErrorRequestTimedOut() => ErrorRequestTimedOut
-    | ErrorBrokerNotAvailable() => ErrorBrokerNotAvailable
-    | ErrorReplicaNotAvailable() => ErrorReplicaNotAvailable
-    | ErrorMessageTooLarge() => ErrorMessageTooLarge
-    | ErrorStaleControllerEpoch() => ErrorStaleControllerEpoch
-    | ErrorOffsetMetadataTooLarge() => ErrorOffsetMetadataTooLarge
-    | ErrorNetworkException() => ErrorNetworkException
-    | ErrorGroupLoadInProgress() => ErrorGroupLoadInProgress
-    | ErrorGroupCoordinatorNotAvailable() => ErrorGroupCoordinatorNotAvailable
-    | ErrorNotCoordinatorForGroup() => ErrorNotCoordinatorForGroup
-    | ErrorInvalidTopicException() => ErrorInvalidTopicException
-    | ErrorRecordListTooLarge() => ErrorRecordListTooLarge
-    | ErrorNotEnoughReplicas() => ErrorNotEnoughReplicas
-    | ErrorNotEnoughReplicasAfterAppend() => ErrorNotEnoughReplicasAfterAppend
-    | ErrorInvalidRequiredAcks() => ErrorInvalidRequiredAcks
-    | ErrorIllegalGeneration() => ErrorIllegalGeneration
-    | ErrorInconsistentGroupProtocol() => ErrorInconsistentGroupProtocol
-    | ErrorInvalidGroupId() => ErrorInvalidGroupId
-    | ErrorUnknownMemberId() => ErrorUnknownMemberId
-    | ErrorInvalidSessionTimeout() => ErrorInvalidSessionTimeout
-    | ErrorRebalanceInProgress() => ErrorRebalanceInProgress
-    | ErrorInvalidCommitOffsetSize() => ErrorInvalidCommitOffsetSize
-    | ErrorTopicAuthorizationFailed() => ErrorTopicAuthorizationFailed
-    | ErrorGroupAuthorizationFailed() => ErrorGroupAuthorizationFailed
-    | ErrorClusterAuthorizationFailed() => ErrorClusterAuthorizationFailed
-    | ErrorInvalidTimestamp() => ErrorInvalidTimestamp
-    | ErrorUnsupportedSASLMechanism() => ErrorUnsupportedSASLMechanism
-    | ErrorIllegalSASLState() => ErrorIllegalSASLState
-    | ErrorUnsupportedVersion() => ErrorUnsupportedVersion
-    | ErrorTopicAlreadyExists() => ErrorTopicAlreadyExists
-    | ErrorInvalidPartitions() => ErrorInvalidPartitions
-    | ErrorInvalidReplicationFactor() => ErrorInvalidReplicationFactor
-    | ErrorInvalidReplicaAssignment() => ErrorInvalidReplicaAssignment
-    | ErrorInvalidConfig() => ErrorInvalidConfig
-    | ErrorNotController() => ErrorNotController
-    | ErrorInvalidRequest() => ErrorInvalidRequest
-    | ErrorUnsupportedForMessageFormat() => ErrorUnsupportedForMessageFormat
-    | ErrorPolicyViolation() => ErrorPolicyViolation
-    | ErrorOutOfOrderSequenceNumber() => ErrorOutOfOrderSequenceNumber
-    | ErrorDuplicateSequenceNumber() => ErrorDuplicateSequenceNumber
-    | ErrorInvalidProducerEpoch() => ErrorInvalidProducerEpoch
-    | ErrorInvalidTxnState() => ErrorInvalidTxnState
-    | ErrorInvalidProducerIdMapping() => ErrorInvalidProducerIdMapping
-    | ErrorInvalidTransactionTimeout() => ErrorInvalidTransactionTimeout
-    | ErrorConcurrentTransactions() => ErrorConcurrentTransactions
-    | ErrorTransactionCoordinatorFenced() => ErrorTransactionCoordinatorFenced
-    | ErrorTransactionalIdAuthorizationFailed() =>
-      ErrorTransactionalIdAuthorizationFailed
-    | ErrorProducerIdAuthorizationFailed() => ErrorProducerIdAuthorizationFailed
-    | ErrorSecurityDisabled() => ErrorSecurityDisabled
-    | ErrorBrokerAuthorizationFailed() => ErrorBrokerAuthorizationFailed
-    else
-      _conf.logger(Warn) and _conf.logger.log(Warn, _name +
-        "Unable to look up error code: " + error_code.string() +
-        "! Using ErrorUnknown.")
-      ErrorUnknown
-    end
-
-
   // send fetched messages to KafkaConsumers
-  fun ref process_fetched_data(fetch_results: Map[String,
+  fun ref process_fetched_data(conn: KafkaBrokerConnection ref, fetch_results: Map[String,
     _KafkaTopicFetchResult], network_received_timestamp: U64)
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name +
       "processing and distributing fetched data")
+    let topics_to_throttle: Map[String, Set[I32] iso] iso =
+      recover topics_to_throttle.create() end
     for (topic, topic_result) in fetch_results.pairs() do
-      try
-        let ts = _state.topics_state(topic)?
-        for (part, part_result) in topic_result.partition_responses.pairs() do
-          for m in part_result.messages.values() do
-            try
-              if m.get_offset() >= ts.partitions_state(part)?.request_offset then
-                let consumer = ts.message_handler(ts.consumers, m)
-                match consumer
-                | let c: KafkaConsumer tag =>
-                    track_consumer_unacked_message(m)
-                    c.receive_kafka_message(m, network_received_timestamp)
-                else
-                  _conf.logger(Fine) and _conf.logger.log(Fine, _name +
-                    "Ignoring message because consumer_message_handler returned"
-                    + " None, message: " + m.string())
-                end
+      let ts = try _state.topics_state(topic)?
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+            "error looking up state for topic: " + topic +
+            ". This should never happen."),
+            topic, -1))
+            return
+          end
+      let mh = ts.message_handler
+      for (part, part_result) in topic_result.partition_responses.pairs() do
+        while part_result.messages.size() > 0 do
+          (let v, var k, let meta_iso) = try part_result.messages.shift()?
+              else
+                _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+                "error shifting messages. This should never happen."),
+                topic, part))
+                return
+              end
+          let meta = consume val meta_iso
+          let part_request_offset = try ts.partitions_state(part)?.request_offset
+            else
+              _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+                "error getting part_state. This should never happen."),
+                topic, part))
+              return
+            end
+          match consume k
+          | let key: (Array[U8] iso | None) =>
+            if meta.get_offset() >= part_request_offset then
+              var consumer: (KafkaConsumer tag | None) = None
+              let key' = match consume key
+              | let k': None =>
+                 consumer = mh(ts.consumers, k', meta)
+                 None
+              | let k': Array[U8] iso =>
+// TODO: Is there any way to keep `key` as an `iso` without copying???????
+// This recover currentl doesn't work because `mh` is turned into a `tag` because it's a `ref` class so we can't call apply on it
+//                recover
+//                  let k'' = consume ref k'
+//                  consumer = mh(ts.consumers, k'', meta)
+//                  consume k''
+//                end
+                let k'' = consume val k'
+                consumer = mh(ts.consumers, k'', meta)
+                k''
+              end
+              match consumer
+              | let c: KafkaConsumer tag =>
+/* this is related to consumer offset tracking and might get revived when group consumer support is added
+                track_consumer_unacked_message(m)
+*/
+                c.receive_kafka_message(consume v, consume key', meta, network_received_timestamp)
               else
                 _conf.logger(Fine) and _conf.logger.log(Fine, _name +
-                  "Ignoring message because offset is lower than requested. " +
-                  "Requested offset: " + _state.topics_state(topic)?
-                  .partitions_state(part)?.request_offset.string() +
-                  ", message: " + m.string())
+                  "Ignoring message because consumer_message_handler returned"
+                  + " None, message: " + meta.string())
               end
             else
-              _conf.logger(Error) and _conf.logger.log(Error, _name +
-                "error distributing fetched msg: " + m.string() +
-                ". This should never happen.")
+              _conf.logger(Fine) and _conf.logger.log(Fine, _name +
+                "Ignoring message because offset is lower than requested. " +
+                "Requested offset: " + part_request_offset.string() +
+                ", message: " + meta.string())
+            end
+          | let err: KafkaError =>
+            match err
+            | let e: (ClientErrorDecode |
+                      ClientErrorNoLZ4 |
+                      ClientErrorNoSnappy |
+                      ClientErrorNoZlib |
+                      ClientErrorShouldNeverHappen |
+                      ClientErrorUnknownCompression)
+            =>
+              _kafka_client._unrecoverable_error(KafkaErrorReport(e, meta.get_topic(), meta.get_partition_id()))
+            | let e: (ClientErrorCorruptMessage |
+                      ClientErrorGZipDecompress |
+                      ClientErrorLZ4Decompress |
+                      ClientErrorSnappyDecompress)
+            =>
+              // TODO: Should these be unrecoverable also? Maybe user should decide?
+              _kafka_client._recoverable_error(KafkaErrorReport(e, meta.get_topic(), meta.get_partition_id()))
+            | let e: ErrorNotLeaderForPartition =>
+              // broker will automagically pause fetch requests for this
+              // partition because leader will be set to -1
+              if not topics_to_throttle.contains(topic) then
+                topics_to_throttle(topic) = recover Set[I32] end
+              end
+              try
+                topics_to_throttle(topic)?.set(part)
+              else
+                _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+                  "Unable to set topics_to_throttle for topic: " + topic +
+                  " and partition: " + part.string() + "!"),
+                topic, part))
+                return
+              end
+              try
+                handle_partition_leader_change(conn,
+                  e, topic, part, Array[ProducerKafkaMessage val], ts.partitions_state(part)?)
+              else
+                _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+                  "error getting part_state. This should never happen."),
+                  topic, part))
+                return
+              end
+            else
+              // fall through for ErrorOffsetOutOfRange, ErrorUnknownTopicOrPartition, ErrorReplicaNotAvailable
+              // all others default to unrecoverable
+              _kafka_client._unrecoverable_error(KafkaErrorReport(err, meta.get_topic(), meta.get_partition_id()))
             end
           end
         end
-      else
-        _conf.logger(Error) and _conf.logger.log(Error, _name +
-          "error looking up state for topic: " + topic +
-          ". This should never happen.")
       end
     end
 
+    // error encountered
+    if topics_to_throttle.size() > 0 then
+      _conf.logger(Fine) and _conf.logger.log(Fine, _name +
+        "Encountered at least one leader change error. Refreshing metadata and
+        throttling producers.")
+      refresh_metadata(conn)
+      _kafka_client._leader_change_throttle(consume val topics_to_throttle,
+        _connection_broker_id)
+    end
+
+/* this is related to consumer offset tracking and might get revived when group consumer support is added
+// LIKELY BITROTTED
   fun ref track_consumer_unacked_message(msg: KafkaMessage val) =>
     try
        _state.consumer_unacked_offsets(msg._get_topic_partition())?
@@ -1426,67 +1753,137 @@ class _KafkaHandler is CustomTCPConnectionNotify
       po.set(msg.get_offset())
       _state.consumer_unacked_offsets(msg._get_topic_partition()) = consume po
     end
+*/
 
   // update state for next offsets to request based on fetched data
   fun ref update_offsets_fetch_response(fetch_results: Map[String,
-    _KafkaTopicFetchResult]) ?
+    _KafkaTopicFetchResult]): Bool
   =>
+    // default to fetching based on timer interval
+    var fetch_immediately: Bool = false
+
     for topic in fetch_results.values() do
       for part in topic.partition_responses.values() do
         if part.largest_offset_seen != -1 then
-          _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
-            .request_offset = part.largest_offset_seen + 1
+          try
+            _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
+              .request_offset = part.largest_offset_seen + 1
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+              "Error getting state for topic/partition."),
+              topic.topic, part.partition_id))
+          end
+
+          // we read new data from a topic...
+          // fetch immediately because there is likely more data waiting for us to fetch..
+          fetch_immediately = true
         end
       end
     end
 
+    fetch_immediately
+
 
   // dispatch method for decoding response from kafka after matching it up to
   // appropriate requested correlation id
-  fun ref decode_response(conn: KafkaBrokerConnection ref, data: Array[U8] val,
-    network_received_timestamp: U64) ?
+  fun ref decode_response(conn: KafkaBrokerConnection ref, data: Array[U8] iso,
+    network_received_timestamp: U64)
   =>
     (let sent_correlation_id, let request_type, let extra_request_data) =
-      _requests_buffer.shift()?
+      try _requests_buffer.shift()?
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+          "Error we received a response to our requests_buffer is empty"
+          " in decode_response. This should never happen."),
+          "N/A", -1))
+        return
+      end
 
-    let rb = recover ref Reader end
-    rb.append(data)
+    _rb.append(consume data)
 
-    let resp_correlation_id = _KafkaResponseHeader.decode(_conf.logger, rb)?
+    let resp_correlation_id = try _KafkaResponseHeader.decode(_conf.logger, _rb)?
+      else
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorDecode(_name + "Error decoding correlation id."),
+          "N/A", -1))
+        return
+      end
 
     if resp_correlation_id != sent_correlation_id then
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Correlation ID from kafka server doesn't match: sent: " +
         sent_correlation_id.string() + ", received: " +
         resp_correlation_id.string())
-      error
+
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorCorrelationIdMismatch,
+        "N/A", -1))
+      return
     end
 
     match request_type
     | let api_versions_api: _KafkaApiVersionsApi
       =>
-        update_api_versions_to_use(api_versions_api
-          .decode_response(_conf.logger, rb)?)
-        // Update metadata
-        match _statemachine.current_state()
-        | _KafkaPhaseUpdateApiVersions =>
-          _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)?
-        | _KafkaPhaseUpdateApiVersionsReconnect =>
-          _statemachine.transition_to(_KafkaPhaseUpdateMetadataReconnect, conn)?
+        try
+          update_api_versions_to_use(api_versions_api
+            .decode_response(_conf.logger, _rb)?)
+
+          // Update metadata
+          match _statemachine.current_state()
+          | _KafkaPhaseUpdateApiVersions =>
+            try
+              _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)?
+            else
+              _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorTransitioningFSMStates(_name +
+                "Error transitioning from " + _statemachine.current_state().string() + " to " + _KafkaPhaseUpdateMetadata.string()),
+                "N/A", -1))
+              return
+            end
+          | _KafkaPhaseUpdateApiVersionsReconnect =>
+            try
+              _statemachine.transition_to(_KafkaPhaseUpdateMetadataReconnect, conn)?
+            else
+              _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorTransitioningFSMStates(_name +
+                "Error transitioning from " + _statemachine.current_state().string() + " to " + _KafkaPhaseUpdateMetadataReconnect.string()),
+                "N/A", -1))
+              return
+            end
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+              "Error we're in state: " + _statemachine.current_state().string() +
+              " in decode_response. This should never happen."),
+              "N/A", -1))
+            return
+          end
         else
-          _conf.logger(Error) and _conf.logger.log(Error, _name +
-            "Error we're in state: " + _statemachine.current_state().string() +
-            " in decode_response. This should never happen.")
+          // error decoding api versions response
+          _conf.logger(Warn) and _conf.logger.log(Warn, _name + "Error decoding ApiVersions response. Falling back to skip use of ApiVersions.")
+          try
+            _statemachine.transition_to(_KafkaPhaseSkipUpdateApiVersions, conn)?
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorTransitioningFSMStates(_name +
+              "Error transitioning from " + _statemachine.current_state().string() + " to " + _KafkaPhaseSkipUpdateApiVersions.string()),
+              "N/A", -1))
+            return
+          end
         end
     | let metadata_api: _KafkaMetadataApi
       =>
         metadata_refresh_request_outstanding = false
 
-        let metadata = metadata_api.decode_response(_conf.logger, rb)?
-        _conf.logger(Fine) and _conf.logger.log(Fine, _name + metadata.string())
+        try
+          let metadata = metadata_api.decode_response(_conf.logger, _rb)?
+          _conf.logger(Fine) and _conf.logger.log(Fine, _name + metadata.string())
 
-        // send kafka client updated metadata
-        _kafka_client._update_metadata(metadata)
+          // send kafka client updated metadata
+          _kafka_client._update_metadata(metadata)
+        else
+          // if we were only supposed to get metadata this is an unrecoverable failure.
+          if _metadata_only then
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorDecode(_name + "Error decoding metadata response."),
+              "N/A", -1))
+          else
+            _conf.logger(Warn) and _conf.logger.log(Warn, _name + "Error decoding metadata response.")
+          end
+        end
 
         if _statemachine.current_state() is _KafkaPhaseDone then
           // cancel any pre-existing timers (in case we have multiple refresh
@@ -1505,13 +1902,20 @@ class _KafkaHandler is CustomTCPConnectionNotify
         else
           if _metadata_only then
             _conf.logger(Info) and _conf.logger.log(Info, _name +
-              "Done updating metadata. Disposing connection.")
-            conn.get_handler().dispose()
+              "Done updating metadata. Ready to shut down.")
+            _num_reconnects_left = 0
+            return
           end
         end
     | let offsets_api: _KafkaOffsetsApi
       =>
-        let offsets = offsets_api.decode_response(_conf.logger, rb)?
+        let offsets = try offsets_api.decode_response(_conf.logger, _rb)?
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorDecode(_name + "Error " +
+              "decoding offsets response."),
+              "N/A", -1))
+            return
+          end
 
         if _conf.logger(Fine) then
           var offsets_str = recover ref String end
@@ -1521,15 +1925,31 @@ class _KafkaHandler is CustomTCPConnectionNotify
           _conf.logger.log(Fine, _name + offsets_str.string())
         end
 
-        update_offsets(offsets)?
-        _statemachine.transition_to(_KafkaPhaseDone, conn)?
+        update_offsets(offsets)
+        if _statemachine.current_state() isnt _KafkaPhaseDone then
+          try
+            _statemachine.transition_to(_KafkaPhaseDone, conn)?
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorTransitioningFSMStates(_name +
+              "Error transitioning from " + _statemachine.current_state().string() + " to " + _KafkaPhaseDone.string()),
+              "N/A", -1))
+            return
+          end
+        end
     | let fetch_api: _KafkaFetchApi
       =>
         _conf.logger(Fine) and _conf.logger.log(Fine, _name +
           "decoding fetched data")
         (let throttle_time_ms, let fetched_data) =
-          fetch_api.decode_response(conn, _conf.logger, rb,
-            _state.topics_state)?
+          try
+            fetch_api.decode_response(conn, _conf.check_crc, _conf.logger, _rb,
+              _state.topics_state)?
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorDecode(_name + "Error " +
+              "decoding fetch response."),
+              "N/A", -1))
+            return
+          end
 
         if _conf.logger(Fine) then
           var fetched_str = recover ref String end
@@ -1539,27 +1959,40 @@ class _KafkaHandler is CustomTCPConnectionNotify
           _conf.logger.log(Fine, _name + fetched_str.string())
         end
 
-        process_fetched_data(fetched_data, network_received_timestamp)
-        update_offsets_fetch_response(fetched_data)?
-        let timer = Timer(_KafkaFetchRequestTimerNotify(conn),
-          _conf.fetch_interval)
-        fetch_data_timer = timer
-        _timers(consume timer)
+        process_fetched_data(conn, fetched_data, network_received_timestamp)
+        if update_offsets_fetch_response(fetched_data) then
+          // we got some new data in our last request..
+          // request again immediately to keep latency down until backpressure kicks in
+          consume_messages(conn)
+        else
+          let timer = Timer(_KafkaFetchRequestTimerNotify(conn),
+            _conf.fetch_interval)
+          fetch_data_timer = timer
+          _timers(consume timer)
+        end
     | let produce_api: _KafkaProduceApi
       =>
         _conf.logger(Fine) and _conf.logger.log(Fine, _name +
           "decoding produce response")
         (let produce_response, let throttle_time) =
-          produce_api.decode_response(_conf.logger, rb)?
+          try
+            produce_api.decode_response(_conf.logger, _rb)?
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorDecode(_name + "Error " +
+              "decoding produce response."),
+              "N/A", -1))
+            return
+          end
         (let size, let num_msgs, let msgs) = match extra_request_data
-           | (let s: I32, let n: U64, let m: Map[String, Map[I32,
-             Array[ProducerKafkaMessage val]]]) => (s, n, m)
-           else
-             _conf.logger(Error) and _conf.logger.log(Error, _name + "Error " +
-               "casting extra_request_data in produce response. This should " +
-               "never happen.")
-             error
-           end
+          | (let s: I32, let n: U64, let m: Map[String, Map[I32,
+            Array[ProducerKafkaMessage val]]]) => (s, n, m)
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name + "Error " +
+              "casting extra_request_data in produce response. This should " +
+              "never happen."),
+              "N/A", -1))
+            return
+          end
 
         if _conf.logger(Fine) then
           var produced_str = recover ref String end
@@ -1570,19 +2003,26 @@ class _KafkaHandler is CustomTCPConnectionNotify
         end
 
         process_produce_response(produce_response, throttle_time, consume msgs,
-          conn)?
+          conn)
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
-        "Unknown kafka response type")
-      error
+        "Unknown kafka request type for response. Correlation ID: " +
+        resp_correlation_id.string() + ", request_type: " +
+        request_type.string() + ".")
+
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorUnknownRequest,
+        "N/A", -1))
+
+      return
     end
 
     // check if batch send timer is active; if not, processing pending buffer so
     // we make progress if we're below max in-flight messages again
     if send_batch_timer is None then
-      process_pending_buffer(conn)?
+      process_pending_buffer(conn)
     end
 
+    _rb.clear()
 
   // assign proper api versions to use after getting supported version info from
   // broker
@@ -1731,7 +2171,6 @@ class _ReconnectTimerNotify is TimerNotify
     _conn = conn
 
   fun ref apply(timer: Timer, count: U64): Bool =>
-    @printf[I32]("Attempting to reconnect... \n".cstring())
     _conn.reconnect()
     false
 
