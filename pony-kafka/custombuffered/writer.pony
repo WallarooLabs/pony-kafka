@@ -91,7 +91,7 @@ class Writer
     """
     Reserve space for size additional bytes.
     """
-    _current.undefined(_current.size() + size')
+    _check(size')
     this
 
   fun ref reserve_chunks(size': USize): Writer^ =>

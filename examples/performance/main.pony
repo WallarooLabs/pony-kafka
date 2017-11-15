@@ -14,10 +14,12 @@ limitations under the License.
 
 */
 
+use "debug"
 use "net"
 use "collections"
 use "time"
 use "options"
+use "signals"
 use "../../pony-kafka/customlogger"
 use "../../pony-kafka"
 
@@ -29,6 +31,7 @@ actor Main is KafkaClientManager
   var _topic: String = ""
   var _num_messages: USize = 1_000_000
   var _message_size: USize = 1_024
+  var _key_size: USize = 0
 
   new create(env: Env) =>
     _env = env
@@ -52,7 +55,14 @@ actor Main is KafkaClientManager
         _num_messages = input.usize()
       | ("produce_message_size", let input: I64) =>
         _message_size = input.usize()
+      | ("produce_key_size", let input: I64) =>
+        _key_size = input.usize()
       end
+    end
+
+    if _key_size > _message_size then
+      env.out.print("Error! produce_key_size (" + _key_size.string() + ") cannot be larger than produce_message_size (" + _message_size.string() + ")!")
+      help = true
     end
 
     if help or (env.args.size() == 1) then
@@ -83,11 +93,23 @@ actor Main is KafkaClientManager
     end
 
     // create kafka client and register producer
-    let kc = try KafkaClient(env.root as AmbientAuth, kconf, this) else return end
+    let kc = try
+        KafkaClient(env.root as AmbientAuth, kconf, this)
+      else
+        @printf[I32]("Error creating KafkaClient\n".cstring())
+        return
+      end
+
     _kc = kc
     if _client_mode == "producer" then
-      kc.register_producer(P(kc, logger, _topic, _num_messages, _message_size))
+      kc.register_producer(P(kc, logger, _topic, _num_messages, _message_size, _key_size))
     end
+
+    _setup_shutdown_handler(kc)
+
+  fun ref _setup_shutdown_handler(kc: KafkaClient) =>
+    SignalHandler(ShutdownHandler(kc), Sig.int())
+    SignalHandler(ShutdownHandler(kc), Sig.term())
 
   fun tag opts(): Array[(String, (None | String), ArgumentType, (Required |
     Optional), String)]
@@ -101,10 +123,12 @@ actor Main is KafkaClientManager
       "print help"))
     opts_array.push(("client_mode", None, StringArgument, Required,
       "producer or consumer"))
-    opts_array.push(("produce_messages", None, I64Argument, Required,
-      "number of messages to produce (1,000,000)"))
+    opts_array.push(("num_messages", None, I64Argument, Required,
+      "number of messages to produce (1000000)"))
     opts_array.push(("produce_message_size", None, I64Argument, Required,
       "size of messages to produce (1024)"))
+    opts_array.push(("produce_key_size", None, I64Argument, Required,
+      "size of key to produce where 0 means no key (0)"))
 
     opts_array
 
@@ -126,37 +150,54 @@ actor Main is KafkaClientManager
 
   be receive_kafka_topics_partitions(topic_partitions: Map[String,
     (KafkaTopicType, Set[I32])] val) =>
-//    @printf[I32]("Received topics/partitions from client\n".cstring())
-
     if _client_mode == "consumer" then
       match _kc
       | let kc: KafkaClient tag =>
+        let consumer = C(kc, logger, _num_messages)
         let consumers = recover iso Array[KafkaConsumer tag] end
-        consumers.push(C(kc, logger, "1", _num_messages))
+        consumers.push(consumer)
 
         kc.register_consumers(_topic, consume consumers)
-        kc.consumer_resume_all()
-        @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Consuming data\n").cstring())
+
+        consumer.start_consuming()
       end
     end
 
   be kafka_client_error(error_report: KafkaErrorReport) =>
     @printf[I32]("Kafka client error\n".cstring())
 
+
+class ShutdownHandler is SignalNotify
+  """
+  Shutdown gracefully on SIGTERM and SIGINT
+  """
+  let _kc: KafkaClient
+
+  new iso create(kc: KafkaClient) =>
+    _kc = kc
+
+  fun ref apply(count: U32): Bool =>
+    @printf[I32]("Received SIGINT or SIGTERM. Shutting down.\n".cstring())
+    _kc.dispose()
+    false
+
 // kafka consumer actor
 actor C is KafkaConsumer
   let logger: Logger[String]
-  let _name: String
   let num_msgs: USize
   var num_msgs_consumed: USize = 0
   let _kc: KafkaClient
+  var start_ts: U64 = Time.nanos()
 
-
-  new create(kc': KafkaClient, logger': Logger[String], name: String, num_msgs': USize = 1_000_000) =>
+  new create(kc': KafkaClient, logger': Logger[String], num_msgs': USize = 1_000_000) =>
     _kc = kc'
     logger = logger'
-    _name = name
     num_msgs = num_msgs'
+
+  be start_consuming() =>
+    _kc.consumer_resume_all()
+    start_ts = Time.nanos()
+    @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Consuming data\n").cstring())
 
   // behavior kafka calls for each message received that should be sent to this
   // actor
@@ -164,14 +205,17 @@ actor C is KafkaConsumer
     network_received_timestamp: U64)
   =>
     num_msgs_consumed = num_msgs_consumed + 1
-    msg.send_consume_successful()
 
-//    if (num_msgs_consumed % 100000) == 0 then
-//      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received " + num_msgs_consumed.string() + " messages so far\n").cstring())
-//    end
+    ifdef debug then
+      if (num_msgs_consumed % 100000) == 0 then
+        @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received " + num_msgs_consumed.string() + " messages so far\n").cstring())
+      end
+    end
 
     if num_msgs_consumed == num_msgs then
-      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received " + num_msgs_consumed.string() + " messages as requested\n").cstring())
+      let end_ts = Time.nanos()
+      let time_taken = end_ts - start_ts
+      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received " + num_msgs_consumed.string() + " messages as requested. Time taken: " + time_taken.string() + ". Throughput: " + (num_msgs_consumed.f64()/time_taken.f64()).string() + ".\n").cstring())
       @printf[I32]("Shutting down\n".cstring())
       _kc.dispose()
     end
@@ -187,23 +231,30 @@ actor P is KafkaProducer
   var num_msgs_produced: USize = 0
   var num_msgs_produced_acked: USize = 0
   let msg_size: USize
+  let key_size: USize
   let topic: String
   var _throttled: Bool = false
   let _kc: KafkaClient
+  var error_printed: Bool = false
+  var num_errors: USize = 0
+  var start_ts: U64 = 0
 
-  new create(kc': KafkaClient, logger': Logger[String], topic': String, num_msgs': USize = 1_000_000, msg_size': USize = 1_024) =>
+  new create(kc': KafkaClient, logger': Logger[String], topic': String, num_msgs': USize = 1_000_000, msg_size': USize = 1_024, key_size': USize = 0) =>
     _kc = kc'
     logger = logger'
     topic = topic'
     num_msgs = num_msgs'
     msg_size = msg_size'
+    key_size = key_size'
 
     @printf[I32](("Requested to produce " + num_msgs.string() + " of " + msg_size.string() + " bytes.\n").cstring())
 
   fun ref update_producer_mapping(mapping: KafkaProducerMapping):
     (KafkaProducerMapping | None)
   =>
-//    @printf[I32]("Producer mapping updated\n".cstring())
+    ifdef debug then
+      @printf[I32]("Producer mapping updated\n".cstring())
+    end
     _kafka_producer_mapping = mapping
 
   fun ref producer_mapping(): (KafkaProducerMapping | None) =>
@@ -212,7 +263,10 @@ actor P is KafkaProducer
   fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[I32, I32]]
     val)
   =>
-//    @printf[I32]("Producer throttled\n".cstring())
+    ifdef debug then
+      @printf[I32]("Producer throttled\n".cstring())
+    end
+
     if not _throttled then
       _throttled = true
     end
@@ -220,8 +274,11 @@ actor P is KafkaProducer
   fun ref _kafka_producer_unthrottled(topic_mapping: Map[String, Map[I32, I32]]
     val, fully_unthrottled: Bool)
   =>
-//    @printf[I32]("Producer unthrottled\n".cstring())
-    if _throttled then
+    ifdef debug then
+      @printf[I32](("Producer unthrottled. fully_unthrottled: " + fully_unthrottled.string() + "\n").cstring())
+    end
+
+    if fully_unthrottled and _throttled then
       _throttled = false
       match _kafka_producer_mapping
       | let p: KafkaProducerMapping => produce_data()
@@ -230,28 +287,37 @@ actor P is KafkaProducer
 
   be kafka_producer_ready() =>
     @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Producing data\n").cstring())
+    start_ts = Time.nanos()
     produce_data()
 
   be kafka_message_delivery_report(delivery_report: KafkaProducerDeliveryReport)
   =>
     num_msgs_produced_acked = num_msgs_produced_acked + 1
     if not (delivery_report.status is ErrorNone) then
-      logger(Error) and logger.log(Error, "received delivery report: " +
-        delivery_report.string())
+      num_errors = num_errors + 1
+      if not error_printed then
+        logger(Error) and logger.log(Error, "received delivery report: " +
+          delivery_report.string())
+        error_printed = true
+      end
     else
       logger(Fine) and logger.log(Fine, "received delivery report: " +
         delivery_report.string())
     end
     if num_msgs_produced_acked == num_msgs then
-      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received acks for all messages produced\n").cstring())
+      let end_ts = Time.nanos()
+      let time_taken = end_ts - start_ts
+      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received acks for all " + num_msgs_produced_acked.string() + " messages produced. num_errors: " + num_errors.string() + ". Time taken: " + time_taken.string() + ". Throughput: " + (num_msgs_produced_acked.f64()/time_taken.f64()).string() + ".\n").cstring())
       @printf[I32]("Shutting down\n".cstring())
       _kc.dispose()
     end
 
-  // example produce data function
+  // produce data function
   be produce_data() =>
     if _throttled then
-//      @printf[I32](("Stopping producing data because throttled. Produced so far: " + num_msgs_produced.string() + "\n").cstring())
+      ifdef debug then
+        @printf[I32](("Stopping producing data because throttled. Produced so far: " + num_msgs_produced.string() + "\n").cstring())
+      end
       return
     end
 
@@ -259,17 +325,33 @@ actor P is KafkaProducer
 
       let o = recover val Array[U8].>undefined(msg_size) end
       let v = o
-      let k = None
+      let k = if key_size == 0 then None else o.trim(0, key_size) end
 
       try
         let ret = (_kafka_producer_mapping as KafkaProducerMapping
           ref).send_topic_message(topic, o, v, k)
-        if ret isnt None then error end
+        match ret
+        | (let e: KafkaError, let p: I32, let a: Any tag) =>
+          match e
+          | ClientErrorNoBuffering =>
+             _throttled = true
+             ifdef debug then
+               @printf[I32](("Stopping producing data because throttled and received error sending. Produced so far: " + num_msgs_produced.string() + "\n").cstring())
+             end
+             return
+          else
+            logger(Error) and logger.log(Error, "error sending message to brokers." + e.string())
+            @printf[I32]("Shutting down\n".cstring())
+            _kc.dispose()
+          end
+        end
+        num_msgs_produced = num_msgs_produced + 1
+        produce_data()
       else
-        logger(Error) and logger.log(Error, "error sending message to brokers")
+        logger(Error) and logger.log(Error, "error casting producer mapping. this should never happen.")
+        @printf[I32]("Shutting down\n".cstring())
+        _kc.dispose()
       end
-      num_msgs_produced = num_msgs_produced + 1
-      produce_data()
     else
       @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Done producing data\n").cstring())
     end

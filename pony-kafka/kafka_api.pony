@@ -305,11 +305,15 @@ class KafkaMessage
 
   fun val _get_created_by(): KafkaBrokerConnection tag => _created_by
 
+/* this is related to consumer offset tracking and might get revived when group consumer support is added
   fun val send_consume_successful() =>
     _created_by.message_consumed(this, true)
+*/
 
+/* this is related to consumer offset tracking and might get revived when group consumer support is added
   fun val send_consume_failed() =>
     _created_by.message_consumed(this, false)
+*/
 
 class _KafkaTopicOffset
   let topic: String
@@ -607,7 +611,7 @@ primitive _KafkaMessageSetCodecV0V1
           let producer = msgs(0)?._get_created_by()
           (let maybe_timestamp, _) = msgs(0)?.get_timestamp()
           let timestamp = maybe_timestamp as I64
-          let cd = if conf.use_java_compatible_snappy_compression then
+          let cd = if conf.use_snappy_java_framing then
               logger(Info) and logger.log(Info,
                 "Using java compatible Snappy compression.")
               SnappyCompressor.compress_array_java(logger,
@@ -755,6 +759,7 @@ primitive _KafkaMessageSetCodecV0V1
     topic_partition: KafkaTopicPartition, msg_data: Array[U8] val,
     part_state: _KafkaTopicPartitionState,
     log_append_timestamp: (I64 | None) = None,
+    check_crc: Bool = true,
     err_str: String = "Error decoding message set"):
     (I64, Array[KafkaMessage iso] iso^) ?
   =>
@@ -793,7 +798,7 @@ primitive _KafkaMessageSetCodecV0V1
         rb.read_contiguous_bytes(msg_size.usize() - 4)?
       (let ls, let msgs) = decode_message(broker_conn, logger, topic_partition,
         offset, crc, remaining_msg_data, part_state, log_append_timestamp,
-        err_str)?
+        check_crc, err_str)?
       let tmp_msgs = consume ref msgs
       while tmp_msgs.size() > 0 do
         // TODO: figure out a way to avoid the shift
@@ -811,19 +816,23 @@ primitive _KafkaMessageSetCodecV0V1
     logger: Logger[String], topic_partition: KafkaTopicPartition,
     offset: I64, crc: I32, msg_data: Array[U8] val,
     part_state: _KafkaTopicPartitionState, log_append_timestamp: (I64 | None),
+    check_crc: Bool,
     err_str: String = "Error decoding message"):
     (I64, Array[KafkaMessage iso] iso^) ?
   =>
     let rb = recover ref Reader end
     rb.append(msg_data)
 
-    let check_crc = Crc32.crc32(msg_data)
-    if crc != check_crc.i32() then
-      logger(Error) and logger.log(Error,
-        "Error message crc did not match. read: " + crc.string() +
-        ", calulated: " + check_crc.i32().string())
-      logger(Error) and logger.log(Error, err_str)
-      error
+    if check_crc then
+      let computed_crc = Crc32.crc32(msg_data)
+      if crc != computed_crc.i32() then
+        // TODO: send this as an error report instead of throwing an error (i.e. proper error handling)
+        logger(Error) and logger.log(Error,
+          "Error message crc did not match. read: " + crc.string() +
+          ", calulated: " + computed_crc.i32().string())
+        logger(Error) and logger.log(Error, err_str)
+        error
+      end
     end
 
     let magic_byte = _KafkaI8Codec.decode(logger, rb,
@@ -892,7 +901,7 @@ primitive _KafkaMessageSetCodecV0V1
           (return_los, return_msgs) = decode(broker_conn, logger,
             topic_partition, consume val decompressed_data, part_state, if
             timestamp_type is KafkaLogAppendTimestamp then timestamp end,
-            "error decoding gzip compressed messages")?
+            check_crc, "error decoding gzip compressed messages")?
         else
           logger(Error) and logger.log(Error,
             "Gzip decompression error! Cannot decompress messages!")
@@ -914,7 +923,7 @@ primitive _KafkaMessageSetCodecV0V1
           (return_los, return_msgs) = decode(broker_conn, logger,
             topic_partition, consume val decompressed_data, part_state, if
             timestamp_type is KafkaLogAppendTimestamp then timestamp end,
-            "error decoding snappy compressed messages")?
+            check_crc, "error decoding snappy compressed messages")?
         else
           logger(Error) and logger.log(Error,
             "Snappy decompression error! Cannot decompress messages!")
@@ -942,7 +951,7 @@ primitive _KafkaMessageSetCodecV0V1
           (return_los, return_msgs) = decode(broker_conn, logger,
             topic_partition, consume val decompressed_data, part_state, if
             timestamp_type is KafkaLogAppendTimestamp then timestamp end,
-            "error decoding lz4 compressed messages")?
+            check_crc, "error decoding lz4 compressed messages")?
         else
           logger(Error) and logger.log(Error,
             "LZ4 decompression error! Cannot decompress messages!")
@@ -1825,8 +1834,9 @@ trait val _KafkaFetchApi is _KafkaApi
   fun encode_request(correlation_id: I32, conf: KafkaConfig val, topics_state:
     Map[String, _KafkaTopicState]): (Array[ByteSeq] iso^ | None)
 
-  fun decode_response(broker_conn: KafkaBrokerConnection tag, logger:
-    Logger[String], rb: Reader, topics_state: Map[String, _KafkaTopicState]):
+  fun decode_response(broker_conn: KafkaBrokerConnection tag, check_crc: Bool,
+    logger: Logger[String], rb: Reader,
+    topics_state: Map[String, _KafkaTopicState]):
     (I32, Map[String, _KafkaTopicFetchResult]) ?
 
 primitive _KafkaFetchV0 is _KafkaFetchApi
@@ -1920,6 +1930,7 @@ primitive _KafkaFetchV0 is _KafkaFetchApi
     num_partitions_encoded
 
   fun decode_response(broker_conn: KafkaBrokerConnection tag,
+    check_crc: Bool,
     logger: Logger[String], rb: Reader,
     topics_state: Map[String, _KafkaTopicState]):
     (I32, Map[String, _KafkaTopicFetchResult]) ?
@@ -1931,16 +1942,18 @@ primitive _KafkaFetchV0 is _KafkaFetchApi
 
     while num_elems > 0 do
       (let topic, let fetch_result) = decode_topic_fetch_result(broker_conn,
-        logger, rb, topics_state)?
+        check_crc, logger, rb, topics_state)?
       topics_fetch_results.insert(topic, fetch_result)?
       num_elems = num_elems - 1
     end
 
     (-1, topics_fetch_results)
 
-  fun decode_topic_fetch_result(broker_conn: KafkaBrokerConnection tag, logger:
-    Logger[String], rb: Reader, topics_state: Map[String, _KafkaTopicState]):
-    (String, _KafkaTopicFetchResult) ? =>
+  fun decode_topic_fetch_result(broker_conn: KafkaBrokerConnection tag,
+    check_crc: Bool, logger: Logger[String], rb: Reader,
+    topics_state: Map[String, _KafkaTopicState]):
+    (String, _KafkaTopicFetchResult) ?
+  =>
     let topic = _KafkaStringCodec.decode(logger, rb, "error decoding topic")?
     let topic_state = topics_state(topic)?
 
@@ -1951,7 +1964,7 @@ primitive _KafkaFetchV0 is _KafkaFetchApi
 
     while num_elems > 0 do
       (let part, let part_resp) = decode_topic_partition_response(broker_conn,
-        logger, rb, topic, topic_state.partitions_state)?
+        check_crc, logger, rb, topic, topic_state.partitions_state)?
       topics_partition_responses.insert(part, part_resp)?
       num_elems = num_elems - 1
     end
@@ -1959,6 +1972,7 @@ primitive _KafkaFetchV0 is _KafkaFetchApi
     (topic, _KafkaTopicFetchResult(topic, topics_partition_responses))
 
   fun decode_topic_partition_response(broker_conn: KafkaBrokerConnection tag,
+    check_crc: Bool,
     logger: Logger[String], rb: Reader, topic: String, parts_state: Map[I32,
     _KafkaTopicPartitionState]): (I32, _KafkaTopicPartitionResponse) ?
   =>
@@ -1982,7 +1996,7 @@ primitive _KafkaFetchV0 is _KafkaFetchApi
       _KafkaMessageSetCodecV0V1.decode(broker_conn, logger,
       KafkaTopicPartition(topic, partition_id),
       rb.read_contiguous_bytes(message_set_size.usize())?,
-      parts_state(partition_id)? where err_str = "error decoding messages")?
+      parts_state(partition_id)? where err_str = "error decoding messages", check_crc = check_crc)?
 
     (partition_id, _KafkaTopicPartitionResponse(partition_id, error_code,
       high_watermark, largest_offset_seen, consume val messages))
@@ -2011,6 +2025,7 @@ primitive _KafkaFetchV1 is _KafkaFetchApi
     end
 
   fun decode_response(broker_conn: KafkaBrokerConnection tag,
+    check_crc: Bool,
     logger: Logger[String], rb: Reader,
     topics_state: Map[String, _KafkaTopicState]):
     (I32, Map[String, _KafkaTopicFetchResult]) ?
@@ -2018,7 +2033,7 @@ primitive _KafkaFetchV1 is _KafkaFetchApi
     let throttle_time_ms = _KafkaI32Codec.decode(logger, rb,
       "Error decoding throttle time")?
     (_, let topics_fetch_results) = _KafkaFetchV0.decode_response(broker_conn,
-      logger, rb, topics_state)?
+      check_crc, logger, rb, topics_state)?
 
     (throttle_time_ms, topics_fetch_results)
 
@@ -2046,11 +2061,12 @@ primitive _KafkaFetchV2 is _KafkaFetchApi
     end
 
   fun decode_response(broker_conn: KafkaBrokerConnection tag,
+    check_crc: Bool,
     logger: Logger[String], rb: Reader,
     topics_state: Map[String, _KafkaTopicState]):
     (I32, Map[String, _KafkaTopicFetchResult]) ?
   =>
-    _KafkaFetchV1.decode_response(broker_conn, logger, rb, topics_state)?
+    _KafkaFetchV1.decode_response(broker_conn, check_crc, logger, rb, topics_state)?
 
 primitive _KafkaFetchV3 is _KafkaFetchApi
   fun version(): I16 => 3
@@ -2109,11 +2125,12 @@ primitive _KafkaFetchV3 is _KafkaFetchApi
     num_topics_encoded
 
   fun decode_response(broker_conn: KafkaBrokerConnection tag,
+    check_crc: Bool,
     logger: Logger[String], rb: Reader,
     topics_state: Map[String, _KafkaTopicState]):
     (I32, Map[String, _KafkaTopicFetchResult]) ?
   =>
-    _KafkaFetchV1.decode_response(broker_conn, logger, rb, topics_state)?
+    _KafkaFetchV1.decode_response(broker_conn, check_crc, logger, rb, topics_state)?
 
 trait val _KafkaOffsetsApi is _KafkaApi
   fun api_key(): I16 => 2

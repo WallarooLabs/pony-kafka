@@ -23,28 +23,36 @@ trait val KafkaError
   fun kafka_official(): Bool
   fun _retriable(): Bool
 
-primitive KafkaClientShouldNeverHappen is KafkaError
+class val ClientErrorShouldNeverHappen is KafkaError
+  let details: String
+
+  new val create(loc: SourceLoc = __loc) =>
+    let file_name: String = loc.file()
+    let file_linenum: String  = loc.line().string()
+    let file_linepos: String  = loc.pos().string()
+    details = file_name + ":" + file_linenum + ":" + file_linepos
+
   fun apply(): I16 => -9000
   fun string(): String => "Client(" + apply().string() +
-    "): This should never happen."
+    "): This should never happen. " + details
   fun kafka_official(): Bool => false
   fun _retriable(): Bool => false
 
-primitive KafkaClientInvalidPartition is KafkaError
+primitive ClientErrorInvalidPartition is KafkaError
   fun apply(): I16 => -9001
   fun string(): String => "Client(" + apply().string() +
     "): Invalid Partition assigned by producer message handler."
   fun kafka_official(): Bool => false
   fun _retriable(): Bool => false
 
-primitive KafkaClientProducerTopicNotRegistered is KafkaError
+primitive ClientErrorProducerTopicNotRegistered is KafkaError
   fun apply(): I16 => -9002
   fun string(): String => "Client(" + apply().string() +
     "): Topic for producing not registered in config."
   fun kafka_official(): Bool => false
   fun _retriable(): Bool => false
 
-primitive ErrorClientMessageTooLarge is KafkaError
+primitive ClientErrorMessageTooLarge is KafkaError
   fun apply(): I16 => -9003
   fun string(): String => "Client(" + apply().string() + "): The request " +
     "included a message larger than the max message size the client is " +
@@ -52,13 +60,41 @@ primitive ErrorClientMessageTooLarge is KafkaError
   fun kafka_official(): Bool => false
   fun _retriable(): Bool => false
 
-primitive KafkaClientNoBuffering is KafkaError
+primitive ClientErrorNoBuffering is KafkaError
   fun apply(): I16 => -9004
   fun string(): String => "Client(" + apply().string() +
     "): Topic/partition is throttled and KafkaClient hasn't implemented " +
     "buffering yet."
   fun kafka_official(): Bool => false
   fun _retriable(): Bool => true
+
+primitive ClientErrorCorrelationIdMismatch is KafkaError
+  fun apply(): I16 => -9005
+  fun string(): String => "Client(" + apply().string() +
+    "): Correlation ID from Broker doesn't match expected Correlation ID."
+  fun kafka_official(): Bool => false
+  fun _retriable(): Bool => false
+
+primitive ClientErrorUnknownRequest is KafkaError
+  fun apply(): I16 => -9006
+  fun string(): String => "Client(" + apply().string() +
+    "): Unknown request type for response."
+  fun kafka_official(): Bool => false
+  fun _retriable(): Bool => false
+
+primitive ClientErrorUnableToLookupBroker is KafkaError
+  fun apply(): I16 => -9006
+  fun string(): String => "Client(" + apply().string() +
+    "): Unable to lookup broker id to send message to."
+  fun kafka_official(): Bool => false
+  fun _retriable(): Bool => false
+
+primitive ClientErrorDecodingMetadataResponse is KafkaError
+  fun apply(): I16 => -9006
+  fun string(): String => "Client(" + apply().string() +
+    "): Error decoding metadata response."
+  fun kafka_official(): Bool => false
+  fun _retriable(): Bool => false
 
 primitive ErrorNone is KafkaError
   fun apply(): I16 => 0

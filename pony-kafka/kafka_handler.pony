@@ -318,6 +318,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
         _conf.logger(Error) and _conf.logger.log(Error, _name +
           "Error updating consumers for topic: " + topic +
           ". This should never happen.")
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+          topic, -1))
       end
     end
 
@@ -370,6 +372,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Error updating message handler for topic: " + topic +
         ". This should never happen.")
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+        topic, -1))
     end
 
   fun ref _consumer_pause(conn: CustomTCPConnection ref, topic: String,
@@ -471,6 +475,10 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
         conn.get_handler().expect(payload_size)
         _header = false
+      else
+        // error decoding payload size.. ignore and wait for more data
+        conn.get_handler().expect(_header_length)
+        _header = true
       end
       true
     else
@@ -549,13 +557,16 @@ class _KafkaHandler is CustomTCPConnectionNotify
                  _conf.logger(Error) and _conf.logger.log(Error, _name + "Error"
                    + " casting extra_request_data in produce response. This"
                    + " should never happen.")
+                 _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+                   "N/A", -1))
                end
         end
       end
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Error cleaning up pending requests. This should never happen.")
-
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+        "N/A", -1))
     end
 
     // terminate timers
@@ -606,6 +617,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
     try
       BigEndianDecoder.i32(rb)?.usize()
     else
+      _conf.logger(Warn) and _conf.logger.log(Warn, _name +
+        "Error decoding payload_length... Ignoring.")
       error
     end
 
@@ -669,6 +682,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Error we're in state: " + _statemachine.current_state().string() +
         " in set_fallback_api_versions. This should never happen.")
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+        "N/A", -1))
     end
 
 
@@ -845,8 +860,14 @@ class _KafkaHandler is CustomTCPConnectionNotify
       _KafkaFetchApi
     let correlation_id = _next_correlation_id()
 
-    _requests_buffer.push((correlation_id, fetch_api, None))
-    fetch_api.encode_request(correlation_id, _conf, _state.topics_state)
+    let fetch_request = fetch_api.encode_request(correlation_id, _conf, _state.topics_state)
+
+    // only add correlation id to requests buffer if there was actually a fetch request
+    if fetch_request isnt None then
+      _requests_buffer.push((correlation_id, fetch_api, None))
+    end
+
+    consume fetch_request
 
   // update brokers list based on what main kafka client actor knows
   fun ref update_brokers_list(brokers_list: Map[I32, (_KafkaBroker val,
@@ -910,9 +931,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
             _conf.logger(Error) and _conf.logger.log(Error, _name +
               "Unable to get topic state for topic: " + topic +
               "! This should never happen.")
-            // TODO: replace this error (and other similar ones) with a request
-            // to kafka client to shut down and let manager know (i.e. fail
-            // fast)
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+              topic, -1))
             error
           end
 
@@ -1080,6 +1100,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Unable to get topic state! This should never happen.")
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+        "N/A", -1))
     end
 
     // transition to updating offsets if needed
@@ -1090,6 +1112,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
       else
         _conf.logger(Error) and _conf.logger.log(Error, _name + "Unable to " +
           "transition to _KafkaPhaseUpdateOffsets. This should never happen.")
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+          "N/A", -1))
       end
     | _KafkaPhaseUpdateMetadataReconnect =>
       try
@@ -1097,6 +1121,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
       else
         _conf.logger(Error) and _conf.logger.log(Error, _name + "Unable to " +
           "transition to _KafkaPhaseDone. This should never happen.")
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+          "N/A", -1))
       end
     end
 
@@ -1118,6 +1144,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
       _conf.logger(Error) and _conf.logger.log(Error, _name +
         "Unable to get produce api from _broker_apis_to_use!" +
         " This should never happen.")
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+        topic, -1))
     end
 
 
@@ -1389,7 +1417,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
                 let consumer = ts.message_handler(ts.consumers, m)
                 match consumer
                 | let c: KafkaConsumer tag =>
+/* this is related to consumer offset tracking and might get revived when group consumer support is added
                     track_consumer_unacked_message(m)
+*/
                     c.receive_kafka_message(m, network_received_timestamp)
                 else
                   _conf.logger(Fine) and _conf.logger.log(Fine, _name +
@@ -1407,6 +1437,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
               _conf.logger(Error) and _conf.logger.log(Error, _name +
                 "error distributing fetched msg: " + m.string() +
                 ". This should never happen.")
+              _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+                topic, part))
             end
           end
         end
@@ -1414,9 +1446,12 @@ class _KafkaHandler is CustomTCPConnectionNotify
         _conf.logger(Error) and _conf.logger.log(Error, _name +
           "error looking up state for topic: " + topic +
           ". This should never happen.")
+        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+          topic, -1))
       end
     end
 
+/* this is related to consumer offset tracking and might get revived when group consumer support is added
   fun ref track_consumer_unacked_message(msg: KafkaMessage val) =>
     try
        _state.consumer_unacked_offsets(msg._get_topic_partition())?
@@ -1426,6 +1461,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       po.set(msg.get_offset())
       _state.consumer_unacked_offsets(msg._get_topic_partition()) = consume po
     end
+*/
 
   // update state for next offsets to request based on fetched data
   fun ref update_offsets_fetch_response(fetch_results: Map[String,
@@ -1468,34 +1504,58 @@ class _KafkaHandler is CustomTCPConnectionNotify
         "Correlation ID from kafka server doesn't match: sent: " +
         sent_correlation_id.string() + ", received: " +
         resp_correlation_id.string())
+
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorCorrelationIdMismatch,
+        "N/A", -1))
       error
     end
 
     match request_type
     | let api_versions_api: _KafkaApiVersionsApi
       =>
-        update_api_versions_to_use(api_versions_api
-          .decode_response(_conf.logger, rb)?)
-        // Update metadata
-        match _statemachine.current_state()
-        | _KafkaPhaseUpdateApiVersions =>
-          _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)?
-        | _KafkaPhaseUpdateApiVersionsReconnect =>
-          _statemachine.transition_to(_KafkaPhaseUpdateMetadataReconnect, conn)?
+        try
+          update_api_versions_to_use(api_versions_api
+            .decode_response(_conf.logger, rb)?)
+
+          // Update metadata
+          match _statemachine.current_state()
+          | _KafkaPhaseUpdateApiVersions =>
+            _statemachine.transition_to(_KafkaPhaseUpdateMetadata, conn)?
+          | _KafkaPhaseUpdateApiVersionsReconnect =>
+            _statemachine.transition_to(_KafkaPhaseUpdateMetadataReconnect, conn)?
+          else
+            _conf.logger(Error) and _conf.logger.log(Error, _name +
+              "Error we're in state: " + _statemachine.current_state().string() +
+              " in decode_response. This should never happen.")
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+              "N/A", -1))
+          end
         else
-          _conf.logger(Error) and _conf.logger.log(Error, _name +
-            "Error we're in state: " + _statemachine.current_state().string() +
-            " in decode_response. This should never happen.")
+          // error decoding api versions response
+          _conf.logger(Warn) and _conf.logger.log(Warn, _name + "Error decoding ApiVersions response. Falling back to skip use of ApiVersions.")
+          _statemachine.transition_to(_KafkaPhaseSkipUpdateApiVersions, conn)?
         end
     | let metadata_api: _KafkaMetadataApi
       =>
         metadata_refresh_request_outstanding = false
 
-        let metadata = metadata_api.decode_response(_conf.logger, rb)?
-        _conf.logger(Fine) and _conf.logger.log(Fine, _name + metadata.string())
+        try
+          let metadata = metadata_api.decode_response(_conf.logger, rb)?
+          _conf.logger(Fine) and _conf.logger.log(Fine, _name + metadata.string())
 
-        // send kafka client updated metadata
-        _kafka_client._update_metadata(metadata)
+          // send kafka client updated metadata
+          _kafka_client._update_metadata(metadata)
+        else
+          // if we were only supposed to get metadata this is an unrecoverable failure.
+          if _metadata_only then
+            _conf.logger(Error) and _conf.logger.log(Error, _name + "Error decoding metadata response.")
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+              "N/A", -1))
+            conn.get_handler().dispose()
+          else
+            _conf.logger(Warn) and _conf.logger.log(Warn, _name + "Error decoding metadata response.")
+          end
+        end
 
         if _statemachine.current_state() is _KafkaPhaseDone then
           // cancel any pre-existing timers (in case we have multiple refresh
@@ -1537,7 +1597,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
         _conf.logger(Fine) and _conf.logger.log(Fine, _name +
           "decoding fetched data")
         (let throttle_time_ms, let fetched_data) =
-          fetch_api.decode_response(conn, _conf.logger, rb,
+          fetch_api.decode_response(conn, _conf.check_crc, _conf.logger, rb,
             _state.topics_state)?
 
         if _conf.logger(Fine) then
@@ -1564,14 +1624,16 @@ class _KafkaHandler is CustomTCPConnectionNotify
         (let produce_response, let throttle_time) =
           produce_api.decode_response(_conf.logger, rb)?
         (let size, let num_msgs, let msgs) = match extra_request_data
-           | (let s: I32, let n: U64, let m: Map[String, Map[I32,
-             Array[ProducerKafkaMessage val]]]) => (s, n, m)
-           else
-             _conf.logger(Error) and _conf.logger.log(Error, _name + "Error " +
-               "casting extra_request_data in produce response. This should " +
-               "never happen.")
-             error
-           end
+          | (let s: I32, let n: U64, let m: Map[String, Map[I32,
+            Array[ProducerKafkaMessage val]]]) => (s, n, m)
+          else
+            _conf.logger(Error) and _conf.logger.log(Error, _name + "Error " +
+              "casting extra_request_data in produce response. This should " +
+              "never happen.")
+            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen,
+              "N/A", -1))
+            error
+          end
 
         if _conf.logger(Fine) then
           var produced_str = recover ref String end
@@ -1585,7 +1647,13 @@ class _KafkaHandler is CustomTCPConnectionNotify
           conn)?
     else
       _conf.logger(Error) and _conf.logger.log(Error, _name +
-        "Unknown kafka response type")
+        "Unknown kafka request type for response. Correlation ID: " +
+        resp_correlation_id.string() + ", request_type: " +
+        request_type.string() + ".")
+
+      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorUnknownRequest,
+        "N/A", -1))
+
       error
     end
 
