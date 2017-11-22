@@ -298,7 +298,7 @@ class KafkaMessage
       + ", timestamp_type = " + _timestamp_type.string()
       + ", key size = " + k_s.string()
       + ", value size = " + _value.size().string()
-      + if _attributes == 0 then ", value = " + m else "" end
+//      + if _attributes == 0 then ", value = " + m else "" end
       + " ]\n"
 
   fun ref _update_offset(offset: I64) => _offset = offset
@@ -713,11 +713,30 @@ primitive _KafkaMessageSetCodecV0V1
     _KafkaByteArrayCodec.encode(wb_temp, msg.get_key(), msg.get_key_size())
     _KafkaByteArrayCodec.encode(wb_temp, msg.get_value(), msg.get_value_size())
 
+    @printf[I32]("Value: %lu\n".cstring(), msg.get_value())
+
     let encoded_msg_size = wb_temp.size()
     let temp = wb_temp.done()
     let encoded_msg: Array[ByteSeq] val = consume temp
 
     let crc = Crc32.crc32_array(encoded_msg).i32()
+
+    ifdef debug then
+      try
+        let mrb = recover Reader end
+        mrb.append(encoded_msg)
+        let msg_data = mrb.block(mrb.size())?
+        let computed_crc = Crc32.crc32(consume msg_data)
+        if crc != computed_crc.i32() then
+          @printf[I32]((
+            "In message encode: Error message crc did not match. read: " + crc.string() +
+            ", calulated: " + computed_crc.i32().string() + "\n").cstring())
+        end
+      else
+          @printf[I32]((
+            "In message encode: Error reading message to check crc\n").cstring())
+      end
+    end
 
     let message_size = encoded_msg_size + 4
 
@@ -757,7 +776,7 @@ primitive _KafkaMessageSetCodecV0V1
 
   fun decode(broker_conn: KafkaBrokerConnection tag, logger: Logger[String],
     topic_partition: KafkaTopicPartition, msg_data: Array[U8] val,
-    part_state: _KafkaTopicPartitionState,
+    part_state: (_KafkaTopicPartitionState | None),
     log_append_timestamp: (I64 | None) = None,
     check_crc: Bool = true,
     err_str: String = "Error decoding message set"):
@@ -786,7 +805,9 @@ primitive _KafkaMessageSetCodecV0V1
         // # messages == 0 and partial message encountered; increase max bytes
         // automagically as a temporary thing to ensure progress can be made
         if messages.size() == 0 then
-          part_state.max_bytes = msg_size * 2
+          match part_state
+          | let ps: _KafkaTopicPartitionState => ps.max_bytes = msg_size * 2
+          end
         end
         break
       end
@@ -815,7 +836,7 @@ primitive _KafkaMessageSetCodecV0V1
   fun decode_message(broker_conn: KafkaBrokerConnection tag,
     logger: Logger[String], topic_partition: KafkaTopicPartition,
     offset: I64, crc: I32, msg_data: Array[U8] val,
-    part_state: _KafkaTopicPartitionState, log_append_timestamp: (I64 | None),
+    part_state: (_KafkaTopicPartitionState | None), log_append_timestamp: (I64 | None),
     check_crc: Bool,
     err_str: String = "Error decoding message"):
     (I64, Array[KafkaMessage iso] iso^) ?
@@ -1181,10 +1202,10 @@ primitive _KafkaRequestHeader
 
     (header_api_key, header_api_version, correlation_id, client_name)
 
-  fun encoded_size(conf: KafkaConfig val): I32 =>
+  fun encoded_size(client_name: String val): I32 =>
     _KafkaI16Codec.encoded_size() + _KafkaI16Codec.encoded_size() +
       _KafkaI32Codec.encoded_size() +
-      _KafkaStringCodec.encoded_size(conf.client_name)
+      _KafkaStringCodec.encoded_size(client_name)
 
 // primitive to decode kafka response header
 primitive _KafkaResponseHeader
@@ -1225,8 +1246,7 @@ trait val _KafkaProduceApi is _KafkaApi
     Array[ByteSeq] iso^
 
   fun decode_request(broker_conn: KafkaBrokerConnection tag,
-    logger: Logger[String], rb: Reader,
-    topics_state: Map[String, _KafkaTopicState]):
+    logger: Logger[String], rb: Reader):
     (I16, I32, Map[String, Map[I32, Array[KafkaMessage iso] val] val] val) ?
 
   fun decode_response(logger: Logger[String], rb: Reader):
@@ -1264,7 +1284,7 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
       else
         conf.logger(Error) and conf.logger.log(Error,
           "Error getting data from pending buffer. This should never happen.")
-        (_KafkaRequestHeader.encoded_size(conf)
+        (_KafkaRequestHeader.encoded_size(conf.client_name)
           + _KafkaI32Codec.encoded_size() // overall message size for framing
           + _KafkaI16Codec.encoded_size() // conf.produce_acks
           + _KafkaI32Codec.encoded_size() // conf.produce_timeout_ms
@@ -1274,7 +1294,7 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
       end
 
     if size == 0 then
-      size = _KafkaRequestHeader.encoded_size(conf)
+      size = _KafkaRequestHeader.encoded_size(conf.client_name)
           + _KafkaI32Codec.encoded_size() // overall message size for framing
           + _KafkaI16Codec.encoded_size() // conf.produce_acks
           + _KafkaI32Codec.encoded_size() // conf.produce_timeout_ms
@@ -1317,7 +1337,7 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
           num_msgs = 0
 
           // reset size
-          size = _KafkaRequestHeader.encoded_size(conf)
+          size = _KafkaRequestHeader.encoded_size(conf.client_name)
             + _KafkaI32Codec.encoded_size() // overall message size for framing
             + _KafkaI16Codec.encoded_size() // conf.produce_acks
             + _KafkaI32Codec.encoded_size() // conf.produce_timeout_ms
@@ -1378,7 +1398,7 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
       else
         conf.logger(Error) and conf.logger.log(Error,
           "Error getting data from pending buffer. This should never happen.")
-        (_KafkaRequestHeader.encoded_size(conf)
+        (_KafkaRequestHeader.encoded_size(conf.client_name)
           + _KafkaI32Codec.encoded_size() // overall message size for framing
           + _KafkaI16Codec.encoded_size() // conf.produce_acks
           + _KafkaI32Codec.encoded_size() // conf.produce_timeout_ms
@@ -1388,7 +1408,7 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
       end
 
     if size == 0 then
-      size = _KafkaRequestHeader.encoded_size(conf)
+      size = _KafkaRequestHeader.encoded_size(conf.client_name)
           + _KafkaI32Codec.encoded_size() // overall message size for framing
           + _KafkaI16Codec.encoded_size() // conf.produce_acks
           + _KafkaI32Codec.encoded_size() // conf.produce_timeout_ms
@@ -1473,7 +1493,7 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
           num_msgs = 0
 
           // reset size
-          size = _KafkaRequestHeader.encoded_size(conf)
+          size = _KafkaRequestHeader.encoded_size(conf.client_name)
             + _KafkaI32Codec.encoded_size() // overall message size for framing
             + _KafkaI16Codec.encoded_size() // conf.produce_acks
             + _KafkaI32Codec.encoded_size() // conf.produce_timeout_ms
@@ -1558,8 +1578,7 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
     end
 
   fun decode_request(broker_conn: KafkaBrokerConnection tag,
-    logger: Logger[String], rb: Reader,
-    topics_state: Map[String, _KafkaTopicState]):
+    logger: Logger[String], rb: Reader):
     (I16, I32, Map[String, Map[I32, Array[KafkaMessage iso] val] val] val) ?
   =>
     let produce_acks = _KafkaI16Codec.decode(logger, rb,
@@ -1576,8 +1595,6 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
     while num_topics > 0 do
       let topic = _KafkaStringCodec.decode(logger, rb, "error decoding topic")?
 
-      let topic_state = topics_state(topic)?
-
       let topic_msgs: Map[I32, Array[KafkaMessage iso] val] iso = recover
         topic_msgs.create() end
 
@@ -1589,8 +1606,6 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
       while num_partitions > 0 do
         let partition_id = _KafkaI32Codec.decode(logger, rb,
           "error decoding partition")?
-
-        let part_state = topic_state.partitions_state(partition_id)?
 
         let message_set_size = _KafkaI32Codec.decode(logger, rb,
           "error decoding message set size")?
@@ -1606,7 +1621,7 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
         (let largest_offset_seen, let messages) =
           _KafkaMessageSetCodecV0V1.decode(broker_conn, logger,
           KafkaTopicPartition(topic, partition_id),
-          rb.block(message_set_size.usize())?, part_state
+          rb.block(message_set_size.usize())?, None
           where err_str = "error decoding messages")?
 
         topic_msgs(partition_id) = consume val messages
@@ -1709,11 +1724,10 @@ primitive _KafkaProduceV1 is _KafkaProduceApi
     wb_msg.done()
 
   fun decode_request(broker_conn: KafkaBrokerConnection tag,
-    logger: Logger[String], rb: Reader,
-    topics_state: Map[String, _KafkaTopicState]):
+    logger: Logger[String], rb: Reader):
     (I16, I32, Map[String, Map[I32, Array[KafkaMessage iso] val] val] val) ?
   =>
-    _KafkaProduceV0.decode_request(broker_conn, logger, rb, topics_state)?
+    _KafkaProduceV0.decode_request(broker_conn, logger, rb)?
 
   fun decode_response(logger: Logger[String], rb: Reader):
     (Map[String, _KafkaTopicProduceResponse], I32) ?
@@ -1765,11 +1779,10 @@ primitive _KafkaProduceV2 is _KafkaProduceApi
     wb_msg.done()
 
   fun decode_request(broker_conn: KafkaBrokerConnection tag,
-    logger: Logger[String], rb: Reader,
-    topics_state: Map[String, _KafkaTopicState]):
+    logger: Logger[String], rb: Reader):
     (I16, I32, Map[String, Map[I32, Array[KafkaMessage iso] val] val] val) ?
   =>
-    _KafkaProduceV0.decode_request(broker_conn, logger, rb, topics_state)?
+    _KafkaProduceV0.decode_request(broker_conn, logger, rb)?
 
   fun decode_response(logger: Logger[String], rb: Reader):
     (Map[String, _KafkaTopicProduceResponse], I32) ?

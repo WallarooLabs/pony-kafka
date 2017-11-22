@@ -16,6 +16,7 @@ limitations under the License.
 
 use "debug"
 use "net"
+use "files"
 use "collections"
 use "time"
 use "options"
@@ -23,7 +24,7 @@ use "signals"
 use "../../pony-kafka/customlogger"
 use "../../pony-kafka"
 
-actor Main is KafkaClientManager
+actor Main is (KafkaClientManager & KafkaNetworkSniffer)
   var _kc: (KafkaClient tag | None) = None
   let _env: Env
   let logger: Logger[String] val
@@ -32,6 +33,7 @@ actor Main is KafkaClientManager
   var _num_messages: USize = 1_000_000
   var _message_size: USize = 1_024
   var _key_size: USize = 0
+  let _sniffing_output_files: Map[I32, File] = _sniffing_output_files.create()
 
   new create(env: Env) =>
     _env = env
@@ -73,7 +75,7 @@ actor Main is KafkaClientManager
     end
 
 
-    let kconf =
+    let kconf_iso =
       try
         KafkaConfigCLIParser(env.args, env.out)?
       else
@@ -82,6 +84,12 @@ actor Main is KafkaClientManager
         KafkaConfigCLIParser.print_usage(env.out)
         return
       end
+
+    ifdef "enable-kafka-network-sniffing" then
+      kconf_iso.network_sniffer = this
+    end
+
+    let kconf: KafkaConfig val = consume kconf_iso
 
     logger = kconf.logger
 
@@ -147,6 +155,23 @@ actor Main is KafkaClientManager
       out.print("--" + long + short_str + "       " + arg_type_str + "    "
         + help)
     end
+
+  be data_sent(broker_id: I32, data: ByteSeqIter) =>
+    try
+      let file = try _sniffing_output_files(broker_id)?
+        else
+          let fp = FilePath(_env.root as AmbientAuth, broker_id.string() + "_sent.raw")?
+          let f = File(fp)
+          _sniffing_output_files(broker_id) = f
+          f
+        end
+        file.writev(data)
+    end
+//    @printf[I32]("Received data sent.\n".cstring())
+
+  be data_received(broker_id: I32, data: Array[U8] iso) =>
+//    @printf[I32]("Received data received.\n".cstring())
+    None
 
   be receive_kafka_topics_partitions(topic_partitions: Map[String,
     (KafkaTopicType, Set[I32])] val) =>
@@ -214,8 +239,8 @@ actor C is KafkaConsumer
 
     if num_msgs_consumed == num_msgs then
       let end_ts = Time.nanos()
-      let time_taken = end_ts - start_ts
-      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received " + num_msgs_consumed.string() + " messages as requested. Time taken: " + time_taken.string() + ". Throughput: " + (num_msgs_consumed.f64()/time_taken.f64()).string() + ".\n").cstring())
+      let time_taken = (end_ts - start_ts).f64()/1_000_000_000.0
+      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received " + num_msgs_consumed.string() + " messages as requested. Time taken: " + time_taken.string() + " seconds. Throughput: " + (num_msgs_consumed.f64()/time_taken.f64()).string() + "/sec.\n").cstring())
       @printf[I32]("Shutting down\n".cstring())
       _kc.dispose()
     end
@@ -306,8 +331,8 @@ actor P is KafkaProducer
     end
     if num_msgs_produced_acked == num_msgs then
       let end_ts = Time.nanos()
-      let time_taken = end_ts - start_ts
-      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received acks for all " + num_msgs_produced_acked.string() + " messages produced. num_errors: " + num_errors.string() + ". Time taken: " + time_taken.string() + ". Throughput: " + (num_msgs_produced_acked.f64()/time_taken.f64()).string() + ".\n").cstring())
+      let time_taken = (end_ts - start_ts).f64()/1_000_000_000.0
+      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received acks for all " + num_msgs_produced_acked.string() + " messages produced. num_errors: " + num_errors.string() + ". Time taken: " + time_taken.string() + " seconds. Throughput: " + (num_msgs_produced_acked.f64()/time_taken.f64()).string() + "/sec.\n").cstring())
       @printf[I32]("Shutting down\n".cstring())
       _kc.dispose()
     end
@@ -326,6 +351,8 @@ actor P is KafkaProducer
       let o = recover val Array[U8].>undefined(msg_size) end
       let v = o
       let k = if key_size == 0 then None else o.trim(0, key_size) end
+
+//      @printf[I32]("Allocated: %lu\n".cstring(), o.cpointer())
 
       try
         let ret = (_kafka_producer_mapping as KafkaProducerMapping

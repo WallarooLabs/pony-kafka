@@ -1,0 +1,181 @@
+/*
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+*/
+
+use "debug"
+use "collections"
+use "options"
+use "files"
+use "customlogger"
+use "custombuffered"
+
+actor Main
+  new create(env: Env) =>
+    let logger = StringLogger(Warn, env.out)
+    let broker_conn = _MockKafkaBrokerConnection
+
+    let options = Options(env.args)
+    var input_file_path = ""
+
+    options
+      .add("input", "i", StringArgument)
+      .add("help", "h", None)
+
+      for option in options do
+        match option
+        | ("input", let arg: String) => input_file_path = arg
+        | ("help", None) =>
+          @printf[I32](
+            """
+            PARAMETERS:
+            -----------------------------------------------------------------------------------
+            --input/-i [Sets file to read from]
+            -----------------------------------------------------------------------------------
+            """.cstring())
+          return
+        end
+      end
+
+    if input_file_path == "" then
+      @printf[I32]("Error input file required!\n".cstring())
+      @printf[I32](
+        """
+        PARAMETERS:
+        -----------------------------------------------------------------------------------
+        --input/-i [Sets file to read from]
+        -----------------------------------------------------------------------------------
+        """.cstring())
+      return
+    end
+
+    let rb = recover ref Reader end
+
+    try
+      let auth = env.root as AmbientAuth
+
+      let fp = FilePath(auth, input_file_path)?
+      let input_file = File(fp)
+      rb.append(input_file.read(input_file.size()))
+
+    else
+      @printf[I32]("Error reading file.\n".cstring())
+      return
+    end
+
+
+    while rb.size() > 0 do
+      let remaining_size = try
+        _KafkaI32Codec.decode(logger, rb,
+          "error decoding size")?
+      else
+        env.out.print("Error decoding message size.")
+        return
+      end
+
+      env.out.print("Next message size: " + remaining_size.string())
+
+      (let api_key, let api_version, let correlation_id, let client_name) =
+        try _KafkaRequestHeader.decode(logger, rb)?
+        else
+          env.out.print("Error decoding header for request.")
+          env.out.print("Exiting.")
+          return
+        end
+
+      env.out.print("API Key: " + api_key.string())
+      env.out.print("API Version: " + api_version.string())
+      env.out.print("Correlation ID: " + correlation_id.string())
+      env.out.print("Client Name: " + client_name)
+
+      match (api_key, api_version)
+      | (_KafkaProduceV0.api_key(), _KafkaProduceV0.version()) =>
+        let api_to_use = _KafkaProduceV0
+        (let produce_acks, let produce_timeout, let msgs) = try
+          api_to_use.decode_request(broker_conn, logger, rb)?
+        else
+          env.out.print("Error decoding request for API Key (" + api_key.string() + ")/Version (" + api_version.string() + ") combination.")
+          continue
+        end
+
+        env.out.print("Produce Acks: " + produce_acks.string())
+        env.out.print("Produce Timeout: " + produce_timeout.string())
+        env.out.print("MessageSet topic count: " + msgs.size().string())
+        for (t, tm) in msgs.pairs() do
+          env.out.print("MessageSet topic: " + t)
+          env.out.print("MessageSet topic partition count: " + tm.size().string())
+          for (p, pm) in tm.pairs() do
+            env.out.print("MessageSet topic partition: " + p.string())
+            env.out.print("MessageSet topic partition message count: " + pm.size().string())
+            for m in pm.values() do
+              env.out.print("MessageSet topic partition message: " + m.string())
+	    end
+          end
+        end
+      | (_KafkaProduceV1.api_key(), _KafkaProduceV1.version()) =>
+        let api_to_use = _KafkaProduceV1
+        (let produce_acks, let produce_timeout, let msgs) = try
+          api_to_use.decode_request(broker_conn, logger, rb)?
+        else
+          env.out.print("Error decoding request for API Key (" + api_key.string() + ")/Version (" + api_version.string() + ") combination.")
+          continue
+        end
+
+        env.out.print("Produce Acks: " + produce_acks.string())
+        env.out.print("Produce Timeout: " + produce_timeout.string())
+        env.out.print("MessageSet topic count: " + msgs.size().string())
+        for (t, tm) in msgs.pairs() do
+          env.out.print("MessageSet topic: " + t)
+          env.out.print("MessageSet topic partition count: " + tm.size().string())
+          for (p, pm) in tm.pairs() do
+            env.out.print("MessageSet topic partition: " + p.string())
+            env.out.print("MessageSet topic partition message count: " + pm.size().string())
+            for m in pm.values() do
+              env.out.print("MessageSet topic partition message: " + m.string())
+	    end
+          end
+        end
+      | (_KafkaProduceV2.api_key(), _KafkaProduceV2.version()) =>
+        let api_to_use = _KafkaProduceV2
+        (let produce_acks, let produce_timeout, let msgs) = try
+          api_to_use.decode_request(broker_conn, logger, rb)?
+        else
+          env.out.print("Error decoding request for API Key (" + api_key.string() + ")/Version (" + api_version.string() + ") combination.")
+          continue
+        end
+
+        env.out.print("Produce Acks: " + produce_acks.string())
+        env.out.print("Produce Timeout: " + produce_timeout.string())
+        env.out.print("MessageSet topic count: " + msgs.size().string())
+        for (t, tm) in msgs.pairs() do
+          env.out.print("MessageSet topic: " + t)
+          env.out.print("MessageSet topic partition count: " + tm.size().string())
+          for (p, pm) in tm.pairs() do
+            env.out.print("MessageSet topic partition: " + p.string())
+            env.out.print("MessageSet topic partition message count: " + pm.size().string())
+            for m in pm.values() do
+              env.out.print("MessageSet topic partition message: " + m.string())
+	    end
+          end
+        end
+      else
+        env.out.print("Unsupported API Key (" + api_key.string() + ")/Version (" + api_version.string() + ") combination. Skipping...")
+        try
+          rb.skip(remaining_size.usize() - _KafkaRequestHeader.encoded_size(client_name).usize())?
+        else
+          env.out.print("Error skipping bytes...")
+          return
+        end
+      end
+    end

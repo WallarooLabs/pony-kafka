@@ -239,7 +239,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       _statemachine.valid_transition(FsmStateAny, _KafkaPhaseUpdateApiVersions,
         {ref(old_state: FsmState val, state_machine: Fsm[CustomTCPConnection
         ref], conn: CustomTCPConnection ref)(kh = this) =>
-        conn.get_handler().writev(kh.update_broker_api_versions())} ref)?
+        kh._write_to_network(conn, kh.update_broker_api_versions())} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateApiVersions,
         _KafkaPhaseUpdateMetadata, {ref(old_state: FsmState val, state_machine:
@@ -264,7 +264,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       _statemachine.valid_transition(_KafkaPhaseUpdateMetadata,
         _KafkaPhaseUpdateOffsets, {ref(old_state: FsmState val, state_machine:
         Fsm[CustomTCPConnection ref], conn: CustomTCPConnection ref)(kh = this)
-        ? => conn.get_handler().writev(kh.request_offsets()?)} ref)?
+        ? => kh._write_to_network(conn, kh.request_offsets()?)} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateOffsets, _KafkaPhaseDone,
         {ref(old_state: FsmState val, state_machine: Fsm[CustomTCPConnection
@@ -275,7 +275,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
         _KafkaPhaseUpdateApiVersionsReconnect, {ref(old_state: FsmState val,
         state_machine: Fsm[CustomTCPConnection ref], conn: CustomTCPConnection
         ref)(kh = this) =>
-        conn.get_handler().writev(kh.update_broker_api_versions())} ref)?
+        kh._write_to_network(conn, kh.update_broker_api_versions())} ref)?
 
       _statemachine.valid_transition(_KafkaPhaseUpdateApiVersionsReconnect,
         _KafkaPhaseUpdateMetadataReconnect, {ref(old_state: FsmState val,
@@ -469,6 +469,27 @@ class _KafkaHandler is CustomTCPConnectionNotify
     let network_received_timestamp: U64 = Time.nanos()
     _conf.logger(Fine) and _conf.logger.log(Fine, _name +
       "Kafka client received " + data.size().string() + " bytes")
+
+    ifdef "enable-kafka-network-sniffing" then
+      match _conf.network_sniffer
+      | let ns: KafkaNetworkSniffer tag =>
+        let copy = recover iso
+          let c: Array[U8] ref = Array[U8]
+          let s = data.size()
+          var i: USize = 0
+          while i < s do
+            try
+              c.push(data(i)?)
+            end
+            i = i + 1
+          end
+          c
+        end
+
+        ns.data_received(_connection_broker_id, consume copy)
+      end
+    end
+
     if _header then
       try
         let payload_size: USize = payload_length(consume data)?
@@ -799,7 +820,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       // TODO: Figure out a way to avoid shift... maybe use a ring buffer?
       (let size, let num_msgs, let msgs) = _pending_buffer.shift()?
 
-      conn.get_handler().writev(produce_messages(size, num_msgs, consume msgs)?)
+      _write_to_network(conn, produce_messages(size, num_msgs, consume msgs)?)
     end
     if _pending_buffer.size() == 0 then
       // initialize pending buffer
@@ -807,8 +828,19 @@ class _KafkaHandler is CustomTCPConnectionNotify
         Array[ProducerKafkaMessage val]]]))
     end
 
+  fun box _write_to_network(conn: CustomTCPConnection ref, data: ByteSeqIter) =>
+    conn.get_handler().writev(data)
+
+    ifdef "enable-kafka-network-sniffing" then
+      match _conf.network_sniffer
+      | let ns: KafkaNetworkSniffer tag =>
+        ns.data_sent(_connection_broker_id, data)
+      end
+    end
+
+
   fun ref produce_messages(size: I32, num_msgs: U64, msgs: Map[String, Map[I32,
-    Array[ProducerKafkaMessage val]]]): Array[ByteSeq] iso^ ?
+    Array[ProducerKafkaMessage val]]]): Array[ByteSeq] val ?
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name + "producing messages")
     let produce_api = _broker_apis_to_use(_KafkaProduceV0.api_key())? as
@@ -822,7 +854,84 @@ class _KafkaHandler is CustomTCPConnectionNotify
         msgs)))
     end
 
-    let encoded_msg = produce_api.encode_request(correlation_id, _conf, msgs)
+    @printf[I32]("Correlation_id: %d\n".cstring(), correlation_id)
+
+    let encoded_msg_iso = produce_api.encode_request(correlation_id, _conf, msgs)
+    let encoded_msg = consume val encoded_msg_iso
+
+                for i in encoded_msg.values() do
+            match i
+            | let a: Array[U8] val =>
+                @printf[I32]("%lu\n".cstring(), a.cpointer())
+                for j in a.values() do
+                  @printf[I32]("%02x ".cstring(), j)
+                end
+            | let s: String =>
+                  @printf[I32]("%s".cstring(), s)
+            end
+                  @printf[I32]("\n".cstring())
+                end
+                  @printf[I32]("\n".cstring())
+/*
+    ifdef debug then
+
+    let broker_conn = _MockKafkaBrokerConnection
+
+    let rb = recover ref Reader end
+    rb.append(encoded_msg)
+
+    while rb.size() > 0 do
+      let remaining_size = try
+        _KafkaI32Codec.decode(_conf.logger, rb,
+          "error decoding size")?
+      else
+        _conf.logger.log(Warn, "Error decoding message size.")
+        break
+      end
+
+      _conf.logger.log(Warn, "Next message size: " + remaining_size.string())
+
+      (let api_key, let api_version, let correlation, let client_name) =
+        try _KafkaRequestHeader.decode(_conf.logger, rb)?
+        else
+          _conf.logger.log(Warn, "Error decoding header for request.")
+          break
+        end
+
+      _conf.logger.log(Warn, "API Key: " + api_key.string())
+      _conf.logger.log(Warn, "API Version: " + api_version.string())
+      _conf.logger.log(Warn, "Correlation ID: " + correlation.string())
+      _conf.logger.log(Warn, "Client Name: " + client_name)
+
+        let api_to_use = produce_api
+        (let produce_acks, let produce_timeout, let messages) = try
+          api_to_use.decode_request(broker_conn, _conf.logger, rb)?
+        else
+          _conf.logger.log(Warn, "Error decoding request for API Key (" + api_key.string() + ")/Version (" + api_version.string() + ") combination.")
+          break
+        end
+
+        _conf.logger.log(Warn, "Produce Acks: " + produce_acks.string())
+        _conf.logger.log(Warn, "Produce Timeout: " + produce_timeout.string())
+        _conf.logger.log(Warn, "MessageSet topic count: " + messages.size().string())
+        for (t, tm) in messages.pairs() do
+          _conf.logger.log(Warn, "MessageSet topic: " + t)
+          _conf.logger.log(Warn, "MessageSet topic partition count: " + tm.size().string())
+          for (p, pm) in tm.pairs() do
+            _conf.logger.log(Warn, "MessageSet topic partition: " + p.string())
+            _conf.logger.log(Warn, "MessageSet topic partition message count: " + pm.size().string())
+            for m in pm.values() do
+              _conf.logger.log(Warn, "MessageSet topic partition message: " + m.string())
+            end
+          end
+        end
+
+
+    end
+
+
+    end
+*/
 
     // Send delivery reports for produce requests which don't get a response
     // from the broker (acks == 0)
@@ -846,7 +955,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       let fetch_request = fetch_messages()?
       match consume fetch_request
       | let fr: Array[ByteSeq] iso =>
-        conn.get_handler().writev(consume fr)
+        _write_to_network(conn, consume fr)
       else
         // there are no topics/partitiions to fetch data for that are unpaused
         _all_topics_partitions_paused = true
@@ -896,7 +1005,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       end
 
       metadata_refresh_request_outstanding = true
-      conn.get_handler().writev(request_metadata()?)
+      _write_to_network(conn, request_metadata()?)
     end
 
   fun ref request_metadata(): Array[ByteSeq] iso^ ?

@@ -54,6 +54,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   var _shutdown_peer: Bool = false
   var _in_sent: Bool = false
 
+  var _backpressure: Bool = false
+
   embed _pending: List[(ByteSeq, USize)] = _pending.create()
   embed _pending_writev: Array[USize] = _pending_writev.create()
   var _pending_writev_total: USize = 0
@@ -194,6 +196,27 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     Write a sequence of sequences of bytes.
     """
 
+/*
+    if _backpressure then
+
+try
+                let o = _pending(0)?
+      @printf[I32]("BBackpressure: %lu, pending size: %lu\n".cstring(), o._1.cpointer(), _pending.size())
+            match o._1
+            | let a: Array[U8] val =>
+                for i in a.values() do
+                  @printf[I32]("%02x ".cstring(), i)
+                end
+            | let s: String =>
+                  @printf[I32]("%s".cstring(), s)
+            end
+                  @printf[I32]("\n".cstring())
+
+end
+    end
+*/
+
+
     if not _closed then
       _in_sent = true
 
@@ -213,7 +236,22 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
 
       _in_sent = false
     end
+/*
+try
+                let o = _pending(0)?
+      @printf[I32]("CBackpressure: %lu, pending size: %lu\n".cstring(), o._1.cpointer(), _pending.size())
+            match o._1
+            | let a: Array[U8] val =>
+                for i in a.values() do
+                  @printf[I32]("%02x ".cstring(), i)
+                end
+            | let s: String =>
+                  @printf[I32]("%s".cstring(), s)
+            end
+                  @printf[I32]("\n".cstring())
 
+end
+*/
   fun ref queuev(data: ByteSeqIter) =>
     """
     Queue a sequence of sequences of bytes on linux.
@@ -320,6 +358,25 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     """
     Handle socket events.
     """
+/*
+    if _backpressure then
+try
+                let o = _pending(0)?
+      @printf[I32]("ABackpressure: %lu\n".cstring(), o._1.cpointer())
+            match o._1
+            | let a: Array[U8] val =>
+                for i in a.values() do
+                  @printf[I32]("%02x ".cstring(), i)
+                end
+            | let s: String =>
+                  @printf[I32]("%s".cstring(), s)
+            end
+                  @printf[I32]("\n".cstring())
+end
+    end
+*/
+
+
     if event isnt _event then
       if AsioEvent.writeable(flags) then
         // A connection has completed.
@@ -524,6 +581,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
             for d in Range[USize](1, num_to_send*2, 2) do
               bytes_to_send = bytes_to_send + _pending_writev(d)?
             end
+            @printf[I32]("TOOO MANY BUFFERS!!!\n".cstring())
           end
 
           // Write as much data as possible.
@@ -538,13 +596,51 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
                 len = len - iov_s
                 _pending_writev.shift()?
                 _pending_writev.shift()?
-                _pending.shift()?
+                let o = _pending.shift()?
+
+//if _backpressure then
+      @printf[I32]("ADone with: %lu\n".cstring(), o._1.cpointer())
+            match o._1
+            | let a: Array[U8] val =>
+                for i in a.values() do
+                  @printf[I32]("%02x ".cstring(), i)
+                end
+            | let s: String =>
+                  @printf[I32]("%s".cstring(), s)
+            end
+                  @printf[I32]("\n".cstring())
+//end
+
                 _pending_writev_total = _pending_writev_total - iov_s
               else
+/*
+                var o = _pending(0)?
+      @printf[I32]("0ANot Done with: %lu\n".cstring(), o._1.cpointer())
+            match o._1
+            | let a: Array[U8] val =>
+                for i in a.values() do
+                  @printf[I32]("%02x ".cstring(), i)
+                end
+            | let s: String =>
+                  @printf[I32]("%s".cstring(), s)
+            end
+                  @printf[I32]("\n".cstring())
+*/
                 _pending_writev.update(0, iov_p+len)?
                 _pending_writev.update(1, iov_s-len)?
                 _pending_writev_total = _pending_writev_total - len
                 len = 0
+                let o = _pending(0)?
+      @printf[I32]("ANot Done with: %lu\n".cstring(), o._1.cpointer())
+            match o._1
+            | let a: Array[U8] val =>
+                for i in a.values() do
+                  @printf[I32]("%02x ".cstring(), i)
+                end
+            | let s: String =>
+                  @printf[I32]("%s".cstring(), s)
+            end
+                  @printf[I32]("\n".cstring())
               end
             end
             _apply_backpressure()
@@ -553,15 +649,42 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
             _pending_writev_total = _pending_writev_total - bytes_to_send
             if _pending_writev_total == 0 then
               _pending_writev.clear()
-              _pending.clear()
+//              _pending.clear()
+              while _pending.size() > 0 do
+                let o = _pending.shift()?
+//if _backpressure then
+      @printf[I32]("BDone with: %lu\n".cstring(), o._1.cpointer())
+            match o._1
+            | let a: Array[U8] val =>
+                for i in a.values() do
+                  @printf[I32]("%02x ".cstring(), i)
+                end
+            | let s: String =>
+                  @printf[I32]("%s".cstring(), s)
+            end
+                  @printf[I32]("\n".cstring())
+              end
+//end
               return true
             else
               for d in Range[USize](0, num_to_send, 1) do
                 _pending_writev.shift()?
                 _pending_writev.shift()?
-                _pending.shift()?
+                let o = _pending.shift()?
+//if _backpressure then
+      @printf[I32]("CDone with: %lu\n".cstring(), o._1.cpointer())
+            match o._1
+            | let a: Array[U8] val =>
+                for i in a.values() do
+                  @printf[I32]("%02x ".cstring(), i)
+                end
+            | let s: String =>
+                  @printf[I32]("%s".cstring(), s)
+            end
+                  @printf[I32]("\n".cstring())
               end
             end
+//end
           end
         else
           // Non-graceful shutdown on error.
@@ -804,6 +927,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
 //    try (_listen as TCPListener)._conn_closed() end
 
   fun ref _apply_backpressure() =>
+    _backpressure = true
     ifdef not windows then
       _writeable = false
       // this is safe because asio thread isn't currently subscribed
@@ -812,9 +936,12 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       @pony_asio_event_resubscribe_write(_event)
     end
 
+            @printf[I32]("BACKPRESSUREEEEEEEE!!!\n".cstring())
     notify.throttled(_conn)
 
   fun ref _release_backpressure() =>
+    _backpressure = false
+            @printf[I32]("RELEASEDDDDDDDDDDDD!!!\n".cstring())
     notify.unthrottled(_conn)
 
   fun ref reconnect() =>

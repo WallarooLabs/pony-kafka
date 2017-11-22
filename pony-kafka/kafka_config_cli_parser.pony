@@ -86,7 +86,7 @@ primitive KafkaConfigCLIParser
         + help)
     end
 
-  fun apply(args: Array[String] val, out: OutStream): KafkaConfig val ? =>
+  fun apply(args: Array[String] val, out: OutStream): KafkaConfig iso^ ? =>
     var log_level = "Warn"
 
     var topic = ""
@@ -152,12 +152,14 @@ primitive KafkaConfigCLIParser
 
     // create kafka config
 
-    match KafkaConfigFactory(client_name, client_mode, topic, brokers,
+    let kconf = KafkaConfigFactory(client_name, client_mode, topic, brokers,
       log_level, max_produce_buffer_ms, max_message_size, compression,
       produce_acks, check_crc, produce_timeout_ms, max_inflight_requests,
       fetch_interval, min_fetch_bytes, max_fetch_bytes,
       partition_fetch_max_bytes, out)
-    | let kc: KafkaConfig val =>
+
+    match consume kconf
+    | let kc: KafkaConfig iso =>
       kc
     | let kce: KafkaConfigError =>
       @printf[U32]("%s\n".cstring(), kce.message().cstring())
@@ -205,7 +207,7 @@ primitive KafkaConfigFactory
     max_fetch_bytes': I32,
     partition_fetch_max_bytes': I32,
     out': OutStream):
-    (KafkaConfig val | KafkaConfigError)
+    (KafkaConfig iso^ | KafkaConfigError)
   =>
     let log_level = match log_level'
       | "Fine" => Fine
@@ -243,7 +245,7 @@ primitive KafkaConfigFactory
       end
 
     recover
-      let kc = KafkaConfig(logger, client_name' + " " + topic' where
+      let kc = KafkaConfig(logger, client_name' where
         produce_acks' = produce_acks',
         max_message_size' = max_message_size',
         max_produce_buffer_ms' = max_produce_buffer_ms',

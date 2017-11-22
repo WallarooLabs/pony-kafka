@@ -259,16 +259,6 @@ primitive _RunProduceApiTest
     var correlation_id: I32 = 9
 
     let topic: String = "test"
-    let partition_id: I32 = 0
-
-    let state = _KafkaState
-    let topic_state = _KafkaTopicState(topic,
-      KafkaRoundRobinConsumerMessageHandler)
-    let topic_partition_state = _KafkaTopicPartitionState(0, partition_id, 0,
-      recover Array[I32] end, recover Array[I32] end)
-
-    topic_state.partitions_state(partition_id) = topic_partition_state
-    state.topics_state(topic) = topic_state
 
     // create kafka config
     let conf =
@@ -311,7 +301,7 @@ primitive _RunProduceApiTest
 
     let broker_conn = _MockKafkaBrokerConnection
     (let produce_acks', let produce_timeout', let msgs') =
-      api_to_use.decode_request(broker_conn, logger, rb, state.topics_state)?
+      api_to_use.decode_request(broker_conn, logger, rb)?
 
     h.assert_eq[I16](produce_acks', conf.produce_acks)
     h.assert_eq[I32](produce_timeout', conf.produce_timeout_ms)

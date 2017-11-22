@@ -44,7 +44,12 @@ primitive KafkaLZ4TopicCompression
 
 primitive _KafkaProducerAuth
 
-// trait for a kafka client manager (this will get adminitrative messages
+// trait for a network sniffer for sniffing/logging kafka network traffic
+trait KafkaNetworkSniffer
+  be data_sent(broker_id: I32, data: ByteSeqIter)
+  be data_received(broker_id: I32, data: Array[U8] iso)
+
+// trait for a kafka client manager (this will get adminitrative messages)
 trait KafkaClientManager
   be receive_kafka_topics_partitions(topic_partitions: Map[String,
     (KafkaTopicType, Set[I32])] val)
@@ -375,6 +380,7 @@ class KafkaConfig
   let max_produce_buffer_time: U64
   let max_produce_buffer_messages: U64
   let check_crc: Bool
+  var network_sniffer: (KafkaNetworkSniffer tag | None)
 
   new create(logger': Logger[String], client_name': String,
     fetch_interval': U64 = 100_000_000, min_fetch_bytes': I32 = 1,
@@ -387,7 +393,8 @@ class KafkaConfig
     refresh_metadata_interval': U64 = 300_000_000_000,
     max_produce_buffer_ms': U64 = 0,
     max_produce_buffer_messages': U64 = 0,
-    check_crc': Bool = false)
+    check_crc': Bool = false,
+    network_sniffer': (KafkaNetworkSniffer tag | None) = None)
   =>
     client_name = client_name'
     fetch_interval = fetch_interval'
@@ -404,6 +411,7 @@ class KafkaConfig
     max_produce_buffer_time = max_produce_buffer_ms' * 1_000_000
     max_produce_buffer_messages = max_produce_buffer_messages'
     check_crc = check_crc'
+    network_sniffer = network_sniffer'
 
   fun ref _set_replica_id(replica_id': I32) =>
     replica_id = replica_id'
