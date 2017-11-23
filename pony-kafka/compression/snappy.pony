@@ -278,8 +278,6 @@ primitive Snappy
       let d = match data
         | let s: String => s.trim(offset, offset + block_size)
         | let a: Array[U8] val => a.trim(offset, offset + block_size)
-        else
-          error
         end
 
       // write compressed data to current write offset + 4

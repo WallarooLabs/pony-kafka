@@ -187,8 +187,6 @@ class KafkaProducerHashPartitioner is KafkaProducerMessageHandler
     | let s: String =>
       let a = s.array(); (Crc32.crc32(a) % num_partitions.usize()).i32()
     | let arr: Array[ByteSeq] val => Crc32.crc32_array(arr).i32()
-    else
-      -1 // this should never happen
     end
 
   fun ref apply(key: None, key_size: USize, num_partitions: I32): I32 =>
@@ -532,8 +530,6 @@ class KafkaProducerMapping
           let value_size = match value
             | let b: ByteSeq => b.size()
             | let a: Array[ByteSeq] val => calc_array_byteseq_size(a)
-            else
-              0
             end
 
           if (key_size + value_size) > conf.max_message_size.usize() then
@@ -635,8 +631,6 @@ class KafkaProducerMapping
         let value_size = match value
           | let b: ByteSeq => b.size()
           | let a: Array[ByteSeq] val => calc_array_byteseq_size(a)
-          else
-            0
           end
 
         if (key_size + value_size) > conf.max_message_size.usize() then

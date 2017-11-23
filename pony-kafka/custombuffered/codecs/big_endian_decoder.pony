@@ -73,8 +73,6 @@ primitive BigEndianDecoder
         out = (out << 8) or iter_all.next()?.u16()
       end
       return out
-    else
-      error // should never happen
     end
 
   fun i16(rb: Reader): I16 ? =>
@@ -107,8 +105,6 @@ primitive BigEndianDecoder
         out = (out << 8) or iter_all.next()?.u32()
       end
       return out
-    else
-      error // should never happen
     end
 
   fun i32(rb: Reader): I32 ? =>
@@ -143,8 +139,6 @@ primitive BigEndianDecoder
         out = (out << 8) or iter_all.next()?.u64()
       end
       return out
-    else
-      error // should never happen
     end
 
   fun i64(rb: Reader): I64 ? =>
@@ -184,8 +178,6 @@ primitive BigEndianDecoder
         out = (out << 8) or iter_all.next()?.u128()
       end
       return out
-    else
-      error // should never happen
     end
 
   fun i128(rb: Reader): I128 ? =>

@@ -672,13 +672,6 @@ primitive _KafkaMessageSetCodecV0V1
           wb_msgs.writev(uncompress_message_set)
         end
       end
-    else
-      logger(Warn) and logger.log(Warn, "Unknown compression type requested. " +
-        "Falling back to uncompressed messages.")
-      for msg in msgs.values() do
-        encode_message(wb_msgs, msg, offset, version)
-        offset = offset + 1
-      end
     end
 
     if not compressed_message_set then

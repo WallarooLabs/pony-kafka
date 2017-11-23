@@ -75,8 +75,6 @@ primitive LittleEndianDecoder
         i = i + 1
       end
       return out
-    else
-      error // should never happen
     end
 
   fun i16(rb: Reader): I16 ? =>
@@ -111,8 +109,6 @@ primitive LittleEndianDecoder
         i = i + 1
       end
       return out
-    else
-      error // should never happen
     end
 
   fun i32(rb: Reader): I32 ? =>
@@ -149,8 +145,6 @@ primitive LittleEndianDecoder
         i = i + 1
       end
       return out
-    else
-      error // should never happen
     end
 
   fun i64(rb: Reader): I64 ? =>
@@ -191,8 +185,6 @@ primitive LittleEndianDecoder
         i = i + 1
       end
       return out
-    else
-      error // should never happen
     end
 
   fun i128(rb: Reader): I128 ? =>

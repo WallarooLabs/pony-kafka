@@ -295,8 +295,6 @@ class Zlib
     let buffer_size = match decompressed_size
     | None => calculate_decompressed_size(data)?
     | let x: USize => x
-    else
-      error // should never happen
     end
 
     _stream = _ZStream

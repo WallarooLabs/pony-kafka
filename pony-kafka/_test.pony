@@ -339,9 +339,6 @@ primitive _RunProduceApiTest
             end
             h.assert_true(ByteSeqComparator.eq(m'.get_value(),
               r.block(r.size())?)?)
-          else
-            // this should never happen
-            error
           end
           match m.get_key()
           | let b: ByteSeq =>
@@ -357,9 +354,6 @@ primitive _RunProduceApiTest
             h.assert_true(KeyComparator.eq(m'.get_key(), r.block(r.size())?)?)
           | let n: None =>
             h.assert_true(KeyComparator.eq(m'.get_key(), n)?)
-          else
-            // this should never happen
-            error
           end
         end
       end
