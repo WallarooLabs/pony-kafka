@@ -285,6 +285,12 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     @pony_os_peername[Bool](_fd, ip)
     ip
 
+  fun requested_address(): (String, String) =>
+    """
+    Return the host and service that were originally provided to the
+    @pony_os_listen_tcp method.
+    """
+    (_host, _service)
 
   fun ref expect(qty: USize = 0) =>
     """

@@ -27,6 +27,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
+use "net"
+
 trait TCPConnectionHandler
 
   fun ref write(data: ByteSeq)
@@ -100,4 +102,20 @@ trait TCPConnectionHandler
   fun ref reconnect()
     """
     A `reconnect` call to ask the handler to handle a reconnection request.
+    """
+
+  fun local_address(): NetAddress
+    """
+    Return the local IP address.
+    """
+
+  fun remote_address(): NetAddress
+    """
+    Return the remote IP address.
+    """
+
+  fun requested_address(): (String, String)
+    """
+    Return the host and service that were originally provided to the
+    @pony_os_listen_tcp method.
     """
