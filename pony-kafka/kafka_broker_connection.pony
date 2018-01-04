@@ -131,12 +131,12 @@ trait KafkaBrokerConnection is CustomTCPConnection
         _KafkaHandler)._update_metadata(meta, this)
     end
 
-  be _leader_change_msgs(meta: _KafkaMetadata val, topic: String,
-    msgs: Map[I32, Array[ProducerKafkaMessage val] iso] val)
+  be _leader_change_msgs(meta: _KafkaMetadata val, topic: String, partition_id: I32,
+    msgs: Map[I32, Array[ProducerKafkaMessage val] iso] val, request_offset: I64)
   =>
     try
       ((get_handler() as CustomTCPConnectionHandler).notify as
-        _KafkaHandler)._leader_change_msgs(meta, topic, msgs, this)
+        _KafkaHandler)._leader_change_msgs(meta, topic, partition_id, msgs, request_offset, this)
     end
 
   be write(data: ByteSeq) =>

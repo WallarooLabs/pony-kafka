@@ -27,6 +27,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
+use "net"
+
 class MockTCPConnectionHandler is TCPConnectionHandler
   new create()
   =>
@@ -114,3 +116,22 @@ class MockTCPConnectionHandler is TCPConnectionHandler
 
   fun ref reconnect() =>
     None
+
+  fun local_address(): NetAddress =>
+    """
+    Return the local IP address.
+    """
+    NetAddress
+
+  fun remote_address(): NetAddress =>
+    """
+    Return the remote IP address.
+    """
+    NetAddress
+
+  fun requested_address(): (String, String) =>
+    """
+    Return the host and service that were originally provided to the
+    @pony_os_listen_tcp method.
+    """
+    ("", "")
