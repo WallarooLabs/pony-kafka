@@ -1980,6 +1980,8 @@ primitive _KafkaFetchV0 is _KafkaFetchApi
     var num_partitions_encoded: I32 = 0
     for (part_id, part_state) in parts_state.pairs() do
       if (not part_state.current_leader) or part_state.paused then
+        conf.logger(Fine) and conf.logger.log(Fine, "Ignoring topic: " + topic + ", partition: "
+           + part_state.partition_id.string())
         continue
       end
       if num_partitions_encoded == 0 then
