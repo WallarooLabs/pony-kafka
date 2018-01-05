@@ -654,7 +654,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       metadata_refresh_timer = None
     end
 
-    _kafka_client._throttle_producers(_connection_broker_id)
+    throttled(conn)
 
     // tell all other brokers to update metadata since we might not be able to reconnect
     // back to this broker to update metadata
@@ -690,12 +690,22 @@ class _KafkaHandler is CustomTCPConnectionNotify
     end
 
   fun ref throttled(conn: CustomTCPConnection ref) =>
+    // don't throttle if it's a initial discovery broker connection
+    if _connection_broker_id < 0 then
+      return
+    end
+
     _conf.logger(Info) and _conf.logger.log(Info, _name +
       "Kafka client is throttled")
     _currently_throttled = true
     _kafka_client._throttle_producers(_connection_broker_id)
 
   fun ref unthrottled(conn: CustomTCPConnection ref) =>
+    // don't unthrottle if it's a initial discovery broker connection
+    if _connection_broker_id < 0 then
+      return
+    end
+
     _conf.logger(Info) and _conf.logger.log(Info, _name +
       "Kafka client is unthrottled")
     _currently_throttled = false
@@ -1019,6 +1029,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
       | let fr: Array[ByteSeq] iso =>
         _write_to_network(conn, consume fr)
       else
+        _conf.logger(Fine) and _conf.logger.log(Fine, _name +
+          "Nothing to fetch. All topics/partitions paused.")
+
         // there are no topics/partitiions to fetch data for that are unpaused
         _all_topics_partitions_paused = true
       end

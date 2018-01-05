@@ -958,7 +958,7 @@ actor KafkaClient
           throttled, false)
         something_resumed = true
         _conf.logger(Fine) and _conf.logger.log(Fine,
-          "Pausing consuming topic: " + topic + " and partition: " +
+          "Resuming consuming topic: " + topic + " and partition: " +
           partition_id.string() + ".")
       end
     else
@@ -1222,7 +1222,7 @@ actor KafkaClient
     for (topic, topic_leader_state) in _topic_leader_state.pairs() do
       // only add topic if it's marked for producing in the config
       if not _conf.producer_topics.contains(topic) then
-        break
+        continue
       end
       try
         let map_topic_part_mapping: Map[I32, I32] iso = recover
@@ -1279,17 +1279,29 @@ actor KafkaClient
 
   // throttling without leader change (no ack confirmation from producers)
   be _throttle_producers(broker_id: I32) =>
+    var fully_unthrottled: Bool = true
+
     // mark all partitions for the broker as throttled
     for (topic, map_leader_state) in _topic_leader_state.pairs() do
       for (partition_id, (leader_id, throttled, consume_paused)) in
         map_leader_state.pairs() do
         if leader_id == broker_id then
+          _conf.logger(Fine) and _conf.logger.log(Fine, "Throttling producers for " +
+            " topic: " + topic + ", paritition: " + partition_id.string())
           map_leader_state(partition_id) = (leader_id, true, consume_paused)
+          fully_unthrottled = false
+        elseif throttled == true then
+          fully_unthrottled = false
         end
       end
     end
 
     update_read_only_topic_mapping()
+
+    // if fully unthrottled because broker_id doesn't own any partitions then don't send updated mapping to producers
+    if fully_unthrottled then
+      return
+    end
 
     // if not full initialized then don't update mapping to send to producers
     if not fully_initialized then
@@ -1311,6 +1323,8 @@ actor KafkaClient
       for (partition_id, (leader_id, throttled, consume_paused)) in
         map_leader_state.pairs() do
         if leader_id == broker_id then
+          _conf.logger(Fine) and _conf.logger.log(Fine, "Unthrottling producers for " +
+            " topic: " + topic + ", paritition: " + partition_id.string())
           map_leader_state(partition_id) = (leader_id, false, consume_paused)
         elseif throttled == true then
           fully_unthrottled = false
@@ -1339,6 +1353,8 @@ actor KafkaClient
       try
         let topic_leader_state_current = _topic_leader_state(topic)?
         for partition_id in partitions.values() do
+          _conf.logger(Fine) and _conf.logger.log(Fine, "Throttling producers for " +
+            " topic: " + topic + ", paritition: " + partition_id.string())
           (let leader_id, let throttled, let consume_paused) =
             topic_leader_state_current(partition_id)?
           topic_leader_state_current(partition_id) = (leader_id, true,
@@ -1413,6 +1429,8 @@ actor KafkaClient
         try
           if topics_to_unthrottle.contains(topic) and
             topics_to_unthrottle(topic)?.contains(partition_id) then
+            _conf.logger(Fine) and _conf.logger.log(Fine, "Unthrottling producers for " +
+              " topic: " + topic + ", paritition: " + partition_id.string())
             map_leader_state(partition_id) = (leader_id, false, consume_paused)
           elseif throttled == true then
             fully_unthrottled = false
