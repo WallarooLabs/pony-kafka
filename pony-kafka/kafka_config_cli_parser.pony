@@ -377,11 +377,11 @@ primitive KafkaConfigFactory
           // if no default, throw an error
           error
         end
-      | let s: String => s.i32()?
+      | let s: String => s.i64()?
       end
 
-  fun _parse_partitions(partitions: String, offset_default: ConsumerRequestOffset): Array[(I32, ConsumerRequestOffset)] val ? =>
-    let partitions_offsets = recover trn Array[(I32, ConsumerRequestOffset)] end
+  fun _parse_partitions(partitions: String, offset_default: ConsumerRequestOffset): Array[(KafkaPartitionId, ConsumerRequestOffset)] val ? =>
+    let partitions_offsets = recover trn Array[(KafkaPartitionId, ConsumerRequestOffset)] end
 
     for part in partitions.split(",").values() do
       let i = part.split(":")

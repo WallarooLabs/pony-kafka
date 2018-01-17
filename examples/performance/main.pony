@@ -34,7 +34,7 @@ actor Main is (KafkaClientManager & KafkaNetworkSniffer)
   var _measure_latency: Bool = false
   var _message_size: USize = 1_024
   var _key_size: USize = 0
-  let _sniffing_output_files: Map[I32, File] = _sniffing_output_files.create()
+  let _sniffing_output_files: Map[KafkaNodeId, File] = _sniffing_output_files.create()
 
   new create(env: Env) =>
     _env = env
@@ -172,7 +172,7 @@ actor Main is (KafkaClientManager & KafkaNetworkSniffer)
         + help)
     end
 
-  be data_sent(broker_id: I32, data: ByteSeqIter) =>
+  be data_sent(broker_id: KafkaNodeId, data: ByteSeqIter) =>
     try
       let file = try _sniffing_output_files(broker_id)?
         else
@@ -184,11 +184,11 @@ actor Main is (KafkaClientManager & KafkaNetworkSniffer)
         file.writev(data)
     end
 
-  be data_received(broker_id: I32, data: Array[U8] iso) =>
+  be data_received(broker_id: KafkaNodeId, data: Array[U8] iso) =>
     None
 
   be receive_kafka_topics_partitions(topic_partitions: Map[String,
-    (KafkaTopicType, Set[I32])] val) =>
+    (KafkaTopicType, Set[KafkaPartitionId])] val) =>
     if _client_mode == "consumer" then
       match _kc
       | let kc: KafkaClient tag =>
@@ -338,7 +338,7 @@ actor P is KafkaProducer
   fun ref producer_mapping(): (KafkaProducerMapping | None) =>
     _kafka_producer_mapping
 
-  fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[I32, I32]]
+  fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
     val)
   =>
     ifdef debug then
@@ -349,7 +349,7 @@ actor P is KafkaProducer
       _throttled = true
     end
 
-  fun ref _kafka_producer_unthrottled(topic_mapping: Map[String, Map[I32, I32]]
+  fun ref _kafka_producer_unthrottled(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
     val, fully_unthrottled: Bool)
   =>
     ifdef debug then
@@ -401,7 +401,7 @@ actor P is KafkaProducer
 
     if num_msgs_produced < num_msgs then
 
-      var ts: (I64 | None) = None
+      var ts: (KafkaTimestamp | None) = None
       let o = recover val
           let arr = Array[U8].>undefined(msg_size)
           if measure_latency then
@@ -433,7 +433,7 @@ actor P is KafkaProducer
         let ret = (_kafka_producer_mapping as KafkaProducerMapping
           ref).send_topic_message(topic, o, v, k, ts)
         match ret
-        | (let e: KafkaError, let p: I32, let a: Any tag) =>
+        | (let e: KafkaError, let p: KafkaPartitionId, let a: Any tag) =>
           match e
           | ClientErrorNoBuffering =>
              _throttled = true

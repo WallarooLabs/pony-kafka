@@ -27,7 +27,7 @@ actor Main is KafkaClientManager
 
   new create(env: Env) =>
     _env = env
-    _logger = StringLogger(Warn, env.out)
+    _logger = StringLogger(Fine, env.out)
 
     // create kafka config
     let kconf =
@@ -62,7 +62,7 @@ actor Main is KafkaClientManager
     end
 
   be receive_kafka_topics_partitions(topic_partitions: Map[String,
-    (KafkaTopicType, Set[I32])] val) =>
+    (KafkaTopicType, Set[KafkaPartitionId])] val) =>
     match _kc
     | let kc: KafkaClient tag =>
       let consumers = recover iso Array[KafkaConsumer tag] end
@@ -124,12 +124,12 @@ actor P is KafkaProducer
   fun ref producer_mapping(): (KafkaProducerMapping | None) =>
     _kafka_producer_mapping
 
-  fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[I32, I32]]
+  fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
     val)
   =>
     None
 
-  fun ref _kafka_producer_unthrottled(topic_mapping: Map[String, Map[I32, I32]]
+  fun ref _kafka_producer_unthrottled(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
     val, fully_unthrottled: Bool)
   =>
     None

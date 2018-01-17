@@ -44,7 +44,7 @@ primitive KafkaLZ4TopicCompression
 
 // initial consumer starting offsets for when first starting client
 type ConsumerRequestOffset is (KafkaOffsetBeginning |
-  KafkaOffsetEnd | I32)
+  KafkaOffsetEnd | KafkaOffset)
 
 primitive KafkaOffsetBeginning
 
@@ -56,8 +56,8 @@ primitive _KafkaProducerAuth
 
 // trait for a network sniffer for sniffing/logging kafka network traffic
 trait KafkaNetworkSniffer
-  be data_sent(broker_id: I32, data: ByteSeqIter)
-  be data_received(broker_id: I32, data: Array[U8] iso)
+  be data_sent(broker_id: KafkaNodeId, data: ByteSeqIter)
+  be data_received(broker_id: KafkaNodeId, data: Array[U8] iso)
 
 // trait for a kafka client manager (this will get adminitrative messages)
 trait KafkaClientManager
@@ -66,7 +66,7 @@ trait KafkaClientManager
   // changes. It is the reponsibility of the manager to tell the
   // client consumer to resume the new partitions if desired.
   be receive_kafka_topics_partitions(topic_partitions: Map[String,
-    (KafkaTopicType, Set[I32])] val)
+    (KafkaTopicType, Set[KafkaPartitionId])] val)
 
   // unrecoverable client error
   be kafka_client_error(error_report: KafkaErrorReport)
@@ -96,8 +96,8 @@ trait KafkaProducer
       kafka_producer_ready()
     end
 
-  be _update_brokers_and_topic_mapping(brokers: Map[I32, (_KafkaBroker val,
-    KafkaBrokerConnection tag)] val, topic_mapping: Map[String, Map[I32, I32]]
+  be _update_brokers_and_topic_mapping(brokers: Map[KafkaNodeId, (_KafkaBroker val,
+    KafkaBrokerConnection tag)] val, topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
     val)
   =>
     let pm = producer_mapping()
@@ -110,7 +110,7 @@ trait KafkaProducer
 
   be kafka_message_delivery_report(delivery_report: KafkaProducerDeliveryReport)
 
-  be _kafka_producer_throttle(topic_mapping: Map[String, Map[I32, I32]] val,
+  be _kafka_producer_throttle(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val,
     ack_requested: Bool, client: KafkaClient, p: KafkaProducer tag)
   =>
     let pm = producer_mapping()
@@ -124,10 +124,10 @@ trait KafkaProducer
 
     _kafka_producer_throttled(topic_mapping)
 
-  fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[I32, I32]]
+  fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
     val)
 
-  be _kafka_producer_unthrottle(topic_mapping: Map[String, Map[I32, I32]] val,
+  be _kafka_producer_unthrottle(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val,
     ack_requested: Bool, client: KafkaClient, p: KafkaProducer tag,
     fully_unthrottled: Bool)
   =>
@@ -142,14 +142,14 @@ trait KafkaProducer
 
     _kafka_producer_unthrottled(topic_mapping, fully_unthrottled)
 
-  fun ref _kafka_producer_unthrottled(topic_mapping: Map[String, Map[I32, I32]]
+  fun ref _kafka_producer_unthrottled(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
     val, fully_unthrottled: Bool)
 
 // trait for a class that can handle kafka messages on produce (assigning
 // partition ids on send)
 trait KafkaProducerMessageHandler
   fun ref apply(key: (ByteSeq | Array[ByteSeq] val | None), key_size: USize,
-    num_partitions: I32): (I32 | None)
+    num_partitions: I32): (KafkaPartitionId | None)
 
   fun clone(): KafkaProducerMessageHandler iso^
 
@@ -164,12 +164,12 @@ trait KafkaConsumerMessageHandler
   fun clone(): KafkaConsumerMessageHandler iso^
 
 class KafkaProducerRoundRobinPartitioner is KafkaProducerMessageHandler
-  var _x: I32 = 0
+  var _x: KafkaPartitionId = 0
 
   new create() => None
 
   fun ref apply(key: (ByteSeq | Array[ByteSeq] val | None), key_size: USize,
-    num_partitions: I32): I32
+    num_partitions: I32): KafkaPartitionId
   =>
     _x = (_x + 1) % num_partitions
 
@@ -186,7 +186,7 @@ class KafkaProducerRandomPartitioner is KafkaProducerMessageHandler
     _mt = MT(_seed)
 
   fun ref apply(key: (ByteSeq | Array[ByteSeq] val | None), key_size: USize,
-    num_partitions: I32): I32
+    num_partitions: I32): KafkaPartitionId
   =>
     (_mt.next() % num_partitions.u64()).i32()
 
@@ -198,7 +198,7 @@ class KafkaProducerHashPartitioner is KafkaProducerMessageHandler
   new create() => None
 
   fun ref apply(key: (ByteSeq | Array[ByteSeq] val), key_size: USize,
-    num_partitions: I32): I32
+    num_partitions: I32): KafkaPartitionId
   =>
     // TODO: replace Crc32 with Murmur2 to be compatible with default partitions
     // for java client?
@@ -210,7 +210,7 @@ class KafkaProducerHashPartitioner is KafkaProducerMessageHandler
     | let arr: Array[ByteSeq] val => Crc32.crc32_array(arr).i32()
     end
 
-  fun ref apply(key: None, key_size: USize, num_partitions: I32): I32 =>
+  fun ref apply(key: None, key_size: USize, num_partitions: I32): KafkaPartitionId =>
     0 // always return partition 0 if None
 
   fun clone(): KafkaProducerMessageHandler iso^ =>
@@ -225,7 +225,7 @@ class KafkaProducerHashRoundRobinPartitioner is KafkaProducerMessageHandler
   new create() => None
 
   fun ref apply(key: (ByteSeq | Array[ByteSeq] val), key_size: USize,
-    num_partitions: I32): I32
+    num_partitions: I32): KafkaPartitionId
   =>
     if key_size > 0 then
       hash_partitioner(key, key_size, num_partitions)
@@ -233,7 +233,7 @@ class KafkaProducerHashRoundRobinPartitioner is KafkaProducerMessageHandler
       rr_partitioner(key, key_size, num_partitions)
     end
 
-  fun ref apply(key: None, key_size: USize, num_partitions: I32): I32 =>
+  fun ref apply(key: None, key_size: USize, num_partitions: I32): KafkaPartitionId =>
     rr_partitioner(key, key_size, num_partitions)
 
   fun clone(): KafkaProducerMessageHandler iso^ =>
@@ -325,9 +325,9 @@ class KafkaHashRoundRobinConsumerMessageHandler is KafkaConsumerMessageHandler
 class val KafkaErrorReport
   let status: KafkaError
   let topic: String
-  let partition: I32
+  let partition: KafkaPartitionId
 
-  new val create(status': KafkaError, topic': String, partition': I32)
+  new val create(status': KafkaError, topic': String, partition': KafkaPartitionId)
   =>
     status = status'
     topic = topic'
@@ -343,13 +343,13 @@ class val KafkaErrorReport
 class val KafkaProducerDeliveryReport
   let status: KafkaError
   let topic: String
-  let partition: I32
-  let first_offset_assigned: I64
-  let timestamp: (I64 | None)
+  let partition: KafkaPartitionId
+  let first_offset_assigned: KafkaOffset
+  let timestamp: (KafkaTimestamp | None)
   let opaque: Any tag
 
-  new val create(status': KafkaError, topic': String, partition': I32,
-    first_offset_assigned': I64, timestamp': (I64 | None), opaque': Any tag)
+  new val create(status': KafkaError, topic': String, partition': KafkaPartitionId,
+    first_offset_assigned': KafkaOffset, timestamp': (KafkaTimestamp | None), opaque': Any tag)
   =>
     status = status'
     topic = topic'
@@ -377,7 +377,7 @@ class KafkaConfig
   let producer_topics: Set[String] = producer_topics.create()
   let topics: Map[String, KafkaTopicConfig] = topics.create()
   let brokers: Set[_KafkaBroker] = brokers.create()
-  var replica_id: I32 = -1
+  var replica_id: KafkaNodeId = -1
   let fetch_interval: U64
   let refresh_metadata_interval: U64
   let min_fetch_bytes: I32
@@ -425,7 +425,7 @@ class KafkaConfig
     check_crc = check_crc'
     network_sniffer = network_sniffer'
 
-  fun ref _set_replica_id(replica_id': I32) =>
+  fun ref _set_replica_id(replica_id': KafkaNodeId) =>
     replica_id = replica_id'
 
   fun ref add_broker(host: String, port: I32 = 9092) =>
@@ -439,7 +439,7 @@ class KafkaConfig
     KafkaHashRoundRobinConsumerMessageHandler end,
     compression: KafkaTopicCompressionType = KafkaNoTopicCompression,
     default_consumer_start_offset': ConsumerRequestOffset = KafkaOffsetBeginning,
-    partitions': (Array[I32] val | Array[(I32, ConsumerRequestOffset)] val | None) = None)
+    partitions': (Array[KafkaPartitionId] val | Array[(KafkaPartitionId, ConsumerRequestOffset)] val | None) = None)
   =>
     let topic_config = KafkaTopicConfig(topic_name, role,
       producer_message_handler, consumer_message_handler, compression, default_consumer_start_offset', partitions')
@@ -465,7 +465,7 @@ class KafkaTopicConfig is Equatable[KafkaTopicConfig box]
   let consumer_message_handler: KafkaConsumerMessageHandler val
   let role: KafkaTopicType
   let compression: KafkaTopicCompressionType
-  let partitions: Map[I32, ConsumerRequestOffset]
+  let partitions: Map[KafkaPartitionId, ConsumerRequestOffset]
   let default_consumer_start_offset: ConsumerRequestOffset
 
   new create(topic_name': String, role': KafkaTopicType = KafkaProduceOnly,
@@ -475,7 +475,7 @@ class KafkaTopicConfig is Equatable[KafkaTopicConfig box]
     KafkaHashRoundRobinConsumerMessageHandler end,
     compression': KafkaTopicCompressionType = KafkaNoTopicCompression,
     default_consumer_start_offset': ConsumerRequestOffset = KafkaOffsetBeginning,
-    partitions': (Array[I32] val | Array[(I32, ConsumerRequestOffset)] val | None) = None)
+    partitions': (Array[KafkaPartitionId] val | Array[(KafkaPartitionId, ConsumerRequestOffset)] val | None) = None)
   =>
     topic_name = topic_name'
     role = role'
@@ -489,13 +489,13 @@ class KafkaTopicConfig is Equatable[KafkaTopicConfig box]
 
     partitions = match partitions'
       | None => partitions.create()
-      | let parts: Array[(I32, ConsumerRequestOffset)] val =>
+      | let parts: Array[(KafkaPartitionId, ConsumerRequestOffset)] val =>
         let parts' = partitions.create()
         for (p, o) in parts.values() do
           parts'(p) = o
         end
         parts'
-      | let parts: Array[I32] val =>
+      | let parts: Array[KafkaPartitionId] val =>
         let parts' = partitions.create()
         for p in parts.values() do
           parts'(p) = default_consumer_start_offset'
@@ -515,16 +515,16 @@ class KafkaTopicConfig is Equatable[KafkaTopicConfig box]
 class KafkaProducerMapping
   let kc: KafkaClient
   let conf: KafkaConfig val
-  var topic_mapping: Map[String, Map[I32, I32]] val
-  var brokers: Map[I32, (_KafkaBroker val, KafkaBrokerConnection tag)] val
+  var topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val
+  var brokers: Map[KafkaNodeId, (_KafkaBroker val, KafkaBrokerConnection tag)] val
   let topic_partitioners: Map[String, KafkaProducerMessageHandler] =
     topic_partitioners.create()
   let _auth: _KafkaProducerAuth = _KafkaProducerAuth
   let _producer: KafkaProducer tag
 
   new create(kc': KafkaClient, conf': KafkaConfig val,
-    topic_mapping': Map[String, Map[I32, I32]] val,
-    brokers': Map[I32, (_KafkaBroker val, KafkaBrokerConnection tag)] val,
+    topic_mapping': Map[String, Map[KafkaPartitionId, KafkaNodeId]] val,
+    brokers': Map[KafkaNodeId, (_KafkaBroker val, KafkaBrokerConnection tag)] val,
     producer: KafkaProducer tag)
   =>
     kc = kc'
@@ -539,13 +539,13 @@ class KafkaProducerMapping
     end
 
   fun ref update_brokers_and_topic_mapping(
-     brokers': Map[I32, (_KafkaBroker val, KafkaBrokerConnection tag)] val,
-     topic_mapping': Map[String, Map[I32, I32]] val)
+     brokers': Map[KafkaNodeId, (_KafkaBroker val, KafkaBrokerConnection tag)] val,
+     topic_mapping': Map[String, Map[KafkaPartitionId, KafkaNodeId]] val)
   =>
     brokers = brokers'
     update_topic_mapping(topic_mapping')
 
-  fun ref update_topic_mapping(topic_mapping': Map[String, Map[I32, I32]] val)
+  fun ref update_topic_mapping(topic_mapping': Map[String, Map[KafkaPartitionId, KafkaNodeId]] val)
   =>
     // TODO: Add logic to compare old and new topic mapping to identify newly
     // unthrottled partitions for which to send buffered messages
@@ -556,15 +556,15 @@ class KafkaProducerMapping
   fun ref send_topic_messages(
     topic: String, msgs: Array[(Any tag, (ByteSeq | Array[ByteSeq] val),
     (None | ByteSeq | Array[ByteSeq] val))]):
-    (None | Array[(KafkaError, I32, Any tag)])
+    (None | Array[(KafkaError, KafkaPartitionId, Any tag)])
   =>
-    let msgs_to_send: Map[I32, Array[ProducerKafkaMessage val] iso] iso =
-      recover iso Map[I32, Array[ProducerKafkaMessage val] iso] end
+    let msgs_to_send: Map[KafkaPartitionId, Array[ProducerKafkaMessage val] iso] iso =
+      recover iso msgs_to_send.create() end
 
-    var error_msgs: (None | Array[(KafkaError, I32, Any tag)]) = None
+    var error_msgs: (None | Array[(KafkaError, KafkaPartitionId, Any tag)]) = None
 
     if conf.producer_topics.contains(topic) then
-      let error_msgs' = Array[(KafkaError, I32, Any tag)]
+      let error_msgs' = Array[(KafkaError, KafkaPartitionId, Any tag)]
 
       try
         let tc = conf.topics(topic)?
@@ -592,7 +592,7 @@ class KafkaProducerMapping
           // run user specified message partitioner to determine which partition
           // the message needs to be sent to
           let part_id = try message_partitioner(key, key_size, tm.size().i32())
-            as I32 else -1 end
+            as KafkaPartitionId else -1 end
 
           if (part_id < 0) or (part_id > tm.size().i32()) then
             error_msgs'.push((ClientErrorInvalidPartition, part_id, opaque))
@@ -633,7 +633,7 @@ class KafkaProducerMapping
       end
 
     else
-      let error_msgs' = Array[(KafkaError, I32, Any tag)]
+      let error_msgs' = Array[(KafkaError, KafkaPartitionId, Any tag)]
       for (opaque, value, key) in msgs.values() do
         error_msgs'.push((ClientErrorProducerTopicNotRegistered, -1, opaque))
       end
@@ -662,8 +662,8 @@ class KafkaProducerMapping
   fun ref send_topic_message(topic: String, opaque: Any tag,
     value: (ByteSeq | Array[ByteSeq] val),
     key: (None | ByteSeq | Array[ByteSeq] val) = None,
-    ts: (I64 | None) = None):
-    (None | (KafkaError, I32, Any tag))
+    ts: (KafkaTimestamp | None) = None):
+    (None | (KafkaError, KafkaPartitionId, Any tag))
   =>
     if conf.producer_topics.contains(topic) then
       try
@@ -691,7 +691,7 @@ class KafkaProducerMapping
         // the message needs to be sent to
         let part_id =
           try
-            message_partitioner(key, key_size, tm.size().i32()) as I32
+            message_partitioner(key, key_size, tm.size().i32()) as KafkaPartitionId
           else
             -1
           end
@@ -739,22 +739,22 @@ actor KafkaClient
   let _initial_broker_connections: SetIs[KafkaBrokerConnection tag] =
     _initial_broker_connections.create()
   let _conf: KafkaConfig val
-  let _brokers: Map[I32, (_KafkaBroker val, KafkaBrokerConnection tag)] =
+  let _brokers: Map[KafkaNodeId, (_KafkaBroker val, KafkaBrokerConnection tag)] =
     _brokers.create()
   let _broker_connection_factory: KafkaBrokerConnectionFactory val
   let _auth: TCPConnectionAuth
   let _manager: KafkaClientManager tag
   let _producers: SetIs[KafkaProducer tag] = _producers.create()
-  var _brokers_read_only: Map[I32, (_KafkaBroker val, KafkaBrokerConnection
+  var _brokers_read_only: Map[KafkaNodeId, (_KafkaBroker val, KafkaBrokerConnection
     tag)] val = recover val _brokers_read_only.create() end
 
-  let _uninitialized_brokers: Set[I32] = _uninitialized_brokers.create()
+  let _uninitialized_brokers: Set[KafkaNodeId] = _uninitialized_brokers.create()
 
-  let _topic_leader_state: Map[String, Map[I32, (I32, Bool, Bool)]] =
+  let _topic_leader_state: Map[String, Map[KafkaPartitionId, (KafkaNodeId, Bool, Bool)]] =
     _topic_leader_state.create()
-  var _topic_mapping_read_only: Map[String, Map[I32, I32]] val = recover val
+  var _topic_mapping_read_only: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val = recover val
     _topic_mapping_read_only.create() end
-  var _topic_partitions_read_only: Map[String, (KafkaTopicType, Set[I32])] val =
+  var _topic_partitions_read_only: Map[String, (KafkaTopicType, Set[KafkaPartitionId])] val =
      recover val _topic_partitions_read_only.create() end
 
   var fully_initialized: Bool = false
@@ -770,11 +770,11 @@ actor KafkaClient
   var _topic_consumers_read_only: Map[String, Array[KafkaConsumer tag] val] val
     = recover val Map[String, Array[KafkaConsumer tag] val] end
 
-  let _leader_change_unthrottle_acks: MapIs[Map[String, Map[I32, I32]] val,
-    (Map[String, Set[I32] iso] val, I32, SetIs[KafkaProducer tag])] =
+  let _leader_change_unthrottle_acks: MapIs[Map[String, Map[KafkaPartitionId, KafkaNodeId]] val,
+    (Map[String, Set[KafkaPartitionId] iso] val, KafkaNodeId, SetIs[KafkaProducer tag])] =
     _leader_change_unthrottle_acks.create()
-  let _leader_change_throttle_acks: MapIs[Map[String, Map[I32, I32]] val,
-    (Map[String, Set[I32] iso] val, I32, SetIs[KafkaProducer tag])] =
+  let _leader_change_throttle_acks: MapIs[Map[String, Map[KafkaPartitionId, KafkaNodeId]] val,
+    (Map[String, Set[KafkaPartitionId] iso] val, KafkaNodeId, SetIs[KafkaProducer tag])] =
     _leader_change_throttle_acks.create()
 
   new create(auth: TCPConnectionAuth, conf: KafkaConfig val,
@@ -799,7 +799,7 @@ actor KafkaClient
 
     // create initial broker connections for discovering kafka metadata; these
     // get killed after reading metadata when initialization is complete
-    var initial_broker_connection_id: I32 = -1
+    var initial_broker_connection_id: KafkaNodeId = -1
     for b in _conf.brokers.values() do
       let bc = _broker_connection_factory(_auth, recover iso _KafkaHandler(this,
         _conf, _topic_consumer_handlers_read_only, initial_broker_connection_id) end, b.host, b.port.string())
@@ -894,7 +894,7 @@ actor KafkaClient
   // robin handler we'd skip that consumer); not sure if it's a good ability
   // in general for other handlers [hash, etc] that can't just send a message
   // to a different consumer so maybe not worth implementing?)
-  be consumer_pause(topic: String, partition_id: I32) =>
+  be consumer_pause(topic: String, partition_id: KafkaPartitionId) =>
     var something_paused: Bool = false
 
     try
@@ -947,7 +947,7 @@ actor KafkaClient
 
   // TODO: Add ability to specify offset to resume from with offset of -999 means continue from current (need to propagate to broker connections and also make sure that it doesn't get overwritten by a fetch reponse in case of an outstanding request)
   // to both this and consumer_resume_all
-  be consumer_resume(topic: String, partition_id: I32) =>
+  be consumer_resume(topic: String, partition_id: KafkaPartitionId) =>
     var something_resumed: Bool = false
 
     try
@@ -998,7 +998,7 @@ actor KafkaClient
     end
 
   // wait for brokers to get initialized
-  be _broker_initialized(broker_id: I32) =>
+  be _broker_initialized(broker_id: KafkaNodeId) =>
     _uninitialized_brokers.unset(broker_id)
 
     // send all producers their producer mappings so they can start producing
@@ -1064,7 +1064,7 @@ actor KafkaClient
 
       let topic_leader_state = try _topic_leader_state(tmeta.topic)?
         else
-          let tm = Map[I32, (I32, Bool, Bool)]
+          let tm = Map[KafkaPartitionId, (KafkaNodeId, Bool, Bool)]
           _topic_leader_state(tmeta.topic) = tm
           topic_mapping_modified = true
           new_topic_partition_added = true
@@ -1145,7 +1145,7 @@ actor KafkaClient
     if brokers_modified then
       // send updated brokers list to all broker connections
 
-      let brokers_list: Map[I32, (_KafkaBroker val, KafkaBrokerConnection tag)]
+      let brokers_list: Map[KafkaNodeId, (_KafkaBroker val, KafkaBrokerConnection tag)]
         iso = recover iso brokers_list.create() end
       for (k, v) in _brokers.pairs() do
         try
@@ -1153,7 +1153,7 @@ actor KafkaClient
         end
       end
 
-      let final_brokers_list: Map[I32, (_KafkaBroker val, KafkaBrokerConnection
+      let final_brokers_list: Map[KafkaNodeId, (_KafkaBroker val, KafkaBrokerConnection
         tag)] val = consume brokers_list
 
       for (_, bc) in _brokers.values() do
@@ -1177,11 +1177,11 @@ actor KafkaClient
       // let kafka client manager know latest topic/partitions list
       if new_topic_partition_added then
 
-        let map_topic_partitions: Map[String, (KafkaTopicType, Set[I32])] iso =
+        let map_topic_partitions: Map[String, (KafkaTopicType, Set[KafkaPartitionId])] iso =
           recover iso map_topic_partitions.create() end
         for (topic, topic_leader_state) in _topic_leader_state.pairs() do
           try
-            let map_topic_parts: Set[I32] iso = recover map_topic_parts.create()
+            let map_topic_parts: Set[KafkaPartitionId] iso = recover map_topic_parts.create()
                end
             for partition_id in topic_leader_state.keys() do
               map_topic_parts.set(partition_id)
@@ -1217,7 +1217,7 @@ actor KafkaClient
     end
 
   fun ref update_read_only_topic_mapping() =>
-    let map_topic_mapping: Map[String, Map[I32, I32]] iso = recover iso
+    let map_topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] iso = recover iso
       map_topic_mapping.create() end
     for (topic, topic_leader_state) in _topic_leader_state.pairs() do
       // only add topic if it's marked for producing in the config
@@ -1225,7 +1225,7 @@ actor KafkaClient
         continue
       end
       try
-        let map_topic_part_mapping: Map[I32, I32] iso = recover
+        let map_topic_part_mapping: Map[KafkaPartitionId, KafkaNodeId] iso = recover
           map_topic_part_mapping.create() end
         for (partition_id, (leader_id, throttled, consume_paused)) in
           topic_leader_state.pairs() do
@@ -1278,9 +1278,8 @@ actor KafkaClient
     end
 
   // throttling without leader change (no ack confirmation from producers)
-  be _throttle_producers(broker_id: I32) =>
+  be _throttle_producers(broker_id: KafkaNodeId) =>
     var fully_unthrottled: Bool = true
-
     // mark all partitions for the broker as throttled
     for (topic, map_leader_state) in _topic_leader_state.pairs() do
       for (partition_id, (leader_id, throttled, consume_paused)) in
@@ -1315,7 +1314,7 @@ actor KafkaClient
     end
 
   // unthrottling without leader change (no ack confirmation from producers)
-  be _unthrottle_producers(broker_id: I32) =>
+  be _unthrottle_producers(broker_id: KafkaNodeId) =>
     var fully_unthrottled: Bool = true
 
     // mark all partitions for the broker as unthrottled
@@ -1345,8 +1344,8 @@ actor KafkaClient
         fully_unthrottled)
     end
 
-  be _leader_change_throttle(topics_to_throttle: Map[String, Set[I32] iso] val,
-    broker_id: I32)
+  be _leader_change_throttle(topics_to_throttle: Map[String, Set[KafkaPartitionId] iso] val,
+    broker_id: KafkaNodeId)
   =>
     // mark topic/partitions requested as throttled
     for (topic, partitions) in topics_to_throttle.pairs() do
@@ -1385,7 +1384,7 @@ actor KafkaClient
       p._kafka_producer_throttle(_topic_mapping_read_only, true, this, p)
     end
 
-  be throttle_ack(topic_mapping: Map[String, Map[I32, I32]] val, actual_p:
+  be throttle_ack(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val, actual_p:
     KafkaProducer tag, sent_p: KafkaProducer tag) =>
     if not (actual_p is sent_p) then
       _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Throttle: Actual " +
@@ -1417,8 +1416,8 @@ actor KafkaClient
     end
 
   be _leader_change_unthrottle(
-    topics_to_unthrottle: Map[String, Set[I32] iso] val,
-    broker_id: I32)
+    topics_to_unthrottle: Map[String, Set[KafkaPartitionId] iso] val,
+    broker_id: KafkaNodeId)
   =>
     var fully_unthrottled: Bool = true
 
@@ -1463,7 +1462,7 @@ actor KafkaClient
         fully_unthrottled)
     end
 
-  be unthrottle_ack(topic_mapping: Map[String, Map[I32, I32]] val,
+  be unthrottle_ack(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val,
     actual_p: KafkaProducer tag, sent_p: KafkaProducer tag)
   =>
     if not (actual_p is sent_p) then
