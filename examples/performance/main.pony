@@ -338,8 +338,7 @@ actor P is KafkaProducer
   fun ref producer_mapping(): (KafkaProducerMapping | None) =>
     _kafka_producer_mapping
 
-  fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
-    val)
+  fun ref _kafka_producer_throttled(topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
   =>
     ifdef debug then
       @printf[I32]("Producer throttled\n".cstring())
@@ -349,14 +348,13 @@ actor P is KafkaProducer
       _throttled = true
     end
 
-  fun ref _kafka_producer_unthrottled(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
-    val, fully_unthrottled: Bool)
+  fun ref _kafka_producer_unthrottled(topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
   =>
     ifdef debug then
-      @printf[I32](("Producer unthrottled. fully_unthrottled: " + fully_unthrottled.string() + "\n").cstring())
+      @printf[I32](("Producer unthrottled. num partitions throttled: " + topic_partitions_throttled.size().string() + "\n").cstring())
     end
 
-    if fully_unthrottled and _throttled then
+    if (topic_partitions_throttled.size() == 0) and _throttled then
       _throttled = false
       match _kafka_producer_mapping
       | let p: KafkaProducerMapping => produce_data()
