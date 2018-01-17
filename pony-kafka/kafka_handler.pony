@@ -17,6 +17,7 @@ limitations under the License.
 use "custombuffered"
 use "custombuffered/codecs"
 use "collections"
+use "random"
 use "time"
 use "customnet"
 use "customlogger"
@@ -53,15 +54,17 @@ primitive _KafkaPhaseSkipUpdateApiVersionsReconnect is FsmState
 
 // kafka handler internal state
 class _KafkaState
-  var controller_id: (I32 | None) = None
+  var rng: Random
+  var controller_id: (KafkaNodeId | None) = None
   var cluster_id: String = ""
   let topics_state: Map[String, _KafkaTopicState] = topics_state.create()
-  let consumer_unacked_offsets: Map[KafkaTopicPartition, Set[I64] iso] =
+  let consumer_unacked_offsets: Map[KafkaTopicPartition, Set[KafkaOffset] iso] =
     consumer_unacked_offsets.create()
 
   new create()
   =>
-    None
+    (let x, let y) = Time.now()
+    rng = Rand(x.u64(), y.u64())
 
   fun string(): String =>
     var topm_str = recover ref String end
@@ -76,17 +79,17 @@ class _KafkaState
 
 // topic internal state
 class _KafkaTopicState
-  var topic_error_code: I16
+  var topic_error_code: KafkaApiError
   let topic: String
   var is_internal: (Bool | None)
-  let partitions_state: Map[I32, _KafkaTopicPartitionState] =
+  let partitions_state: Map[KafkaPartitionId, _KafkaTopicPartitionState] =
     partitions_state.create()
   var consumers: Array[KafkaConsumer tag] val = recover val consumers.create()
     end
   var message_handler: KafkaConsumerMessageHandler
 
   new create(topic': String, message_handler': KafkaConsumerMessageHandler,
-    topic_error_code': I16 = 0, is_internal': (Bool | None) = None)
+    topic_error_code': KafkaApiError = 0, is_internal': (Bool | None) = None)
   =>
     topic_error_code = topic_error_code'
     topic = topic'
@@ -106,15 +109,15 @@ class _KafkaTopicState
       + " ]\n"
 
 class _KafkaTopicPartitionState
-  var partition_error_code: I16
-  let partition_id: I32
-  var leader: I32
-  var replicas: Array[I32] val
-  var isrs: Array[I32] val
-  var request_timestamp: I64
-  var error_code: I16 = 0
-  var timestamp: (I64 | None) = None
-  var request_offset: I64 = -1
+  var partition_error_code: KafkaApiError
+  let partition_id: KafkaPartitionId
+  var leader: KafkaNodeId
+  var replicas: Array[KafkaNodeId] val
+  var isrs: Array[KafkaNodeId] val
+  var request_timestamp: KafkaTimestamp
+  var error_code: KafkaApiError = 0
+  var timestamp: (KafkaTimestamp | None) = None
+  var request_offset: KafkaOffset = -1
   var max_bytes: I32
   var paused: Bool = true
   var current_leader: Bool = false
@@ -127,8 +130,8 @@ class _KafkaTopicPartitionState
   var leader_change: Bool = false
   var leader_change_receiver: Bool = false
 
-  new create(partition_error_code': I16, partition_id': I32, leader': I32,
-    replicas': Array[I32] val, isrs': Array[I32] val, request_timestamp': I64 =
+  new create(partition_error_code': KafkaApiError, partition_id': KafkaPartitionId, leader': KafkaNodeId,
+    replicas': Array[KafkaNodeId] val, isrs': Array[KafkaNodeId] val, request_timestamp': KafkaTimestamp =
     -2, max_bytes': I32 = 32768)
   =>
     partition_error_code = partition_error_code'
@@ -160,21 +163,21 @@ class _KafkaTopicPartitionState
 
 // actual kafka handler logic
 class _KafkaHandler is CustomTCPConnectionNotify
-  var _correlation_id: I32 = 1
+  var _correlation_id: KafkaCorrelationId = 1
   var _header: Bool = true
   let _header_length: USize = 4
-  let _pending_buffer: Array[(I32, U64, Map[String, Map[I32,
+  let _pending_buffer: Array[(I32, U64, Map[String, Map[KafkaPartitionId,
     Array[ProducerKafkaMessage val]]])] = _pending_buffer.create(64)
-  let _requests_buffer: Array[(I32, _KafkaApi, (None | (I32, U64, Map[String,
-    Map[I32, Array[ProducerKafkaMessage val]]])))] = _requests_buffer.create(64)
-  var _broker_apis_to_use: Map[I16, _KafkaApi] = _broker_apis_to_use.create()
+  let _requests_buffer: Array[(KafkaCorrelationId, _KafkaApi, (None | (I32, U64, Map[String,
+    Map[KafkaPartitionId, Array[ProducerKafkaMessage val]]])))] = _requests_buffer.create(64)
+  var _broker_apis_to_use: Map[KafkaApiKey, _KafkaApi] = _broker_apis_to_use.create()
   var _api_versions_supported: Bool = true
 
   let _state: _KafkaState = _KafkaState
 
-  var _brokers: Map[I32, (_KafkaBroker val, KafkaBrokerConnection tag)] val =
+  var _brokers: Map[KafkaNodeId, (_KafkaBroker val, KafkaBrokerConnection tag)] val =
     recover val _brokers.create() end
-  let _connection_broker_id: I32
+  let _connection_broker_id: KafkaNodeId
 
   let _conf: KafkaConfig val
   let _metadata_only: Bool
@@ -201,7 +204,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
   new create(client: KafkaClient, conf: KafkaConfig val,
     topic_consumer_handlers: Map[String, KafkaConsumerMessageHandler val] val,
-    connection_broker_id: I32 = -1, reconnect_closed_delay: U64 = 100_000_000,
+    connection_broker_id: KafkaNodeId = -1, reconnect_closed_delay: U64 = 100_000_000,
     reconnect_failed_delay: U64 = 1_000_000_000, num_reconnects: U8 = 250)
   =>
     _conf = conf
@@ -216,7 +219,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     _name = _conf.client_name + "#" + _connection_broker_id.string() + ": "
 
     // initialize pending buffer
-    _pending_buffer.push((0, 0, Map[String, Map[I32, Array[ProducerKafkaMessage
+    _pending_buffer.push((0, 0, Map[String, Map[KafkaPartitionId, Array[ProducerKafkaMessage
       val]]]))
 
     for (topic, consumer_handler) in topic_consumer_handlers.pairs() do
@@ -389,7 +392,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     end
 
   fun ref _consumer_pause(conn: KafkaBrokerConnection ref, topic: String,
-    partition_id: I32)
+    partition_id: KafkaPartitionId)
   =>
     // set to paused
     // if everything is paused, next attempt to fetch_data
@@ -412,7 +415,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     end
 
   fun ref _consumer_resume(conn: KafkaBrokerConnection ref, topic: String,
-    partition_id: I32) =>
+    partition_id: KafkaPartitionId) =>
     // set to unpaused
     try
       _state.topics_state(topic)?.partitions_state(partition_id)?.paused = false
@@ -628,7 +631,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       | let produce_api: _KafkaProduceApi
         =>
           match consume extra_request_data
-          | (let s: I32, let n: U64, let m: Map[String, Map[I32,
+          | (let s: I32, let n: U64, let m: Map[String, Map[KafkaPartitionId,
             Array[ProducerKafkaMessage val]]]) =>
             _pending_buffer.unshift((s, n, consume m))
           else
@@ -719,7 +722,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
   // correlation id is assigned to each request sent to the broker. Brokers
   // always send back correlation id with each response and process all requests
   // sequentially.
-  fun ref _next_correlation_id(): I32 =>
+  fun ref _next_correlation_id(): KafkaCorrelationId =>
     _correlation_id = _correlation_id + 1
 
   fun ref payload_length(data: Array[U8] iso): USize ? =>
@@ -838,7 +841,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
   // auth: KafkaProducerAuth is a guard to ensure people don't try and send
   // messages without using the KafkaProducerMapping
   fun ref send_kafka_message(conn: KafkaBrokerConnection ref, topic: String,
-    partition_id: I32, msg: ProducerKafkaMessage val, auth: _KafkaProducerAuth)
+    partition_id: KafkaPartitionId, msg: ProducerKafkaMessage val, auth: _KafkaProducerAuth)
   =>
     let produce_api = try _broker_apis_to_use(_KafkaProduceV0.api_key())? as
         _KafkaProduceApi
@@ -862,7 +865,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     _maybe_process_pending_buffer(conn)
 
   fun ref send_kafka_messages(conn: KafkaBrokerConnection ref, topic: String,
-    msgs: Map[I32, Array[ProducerKafkaMessage val] iso] val, auth:
+    msgs: Map[KafkaPartitionId, Array[ProducerKafkaMessage val] iso] val, auth:
     _KafkaProducerAuth)
   =>
     let produce_api = try _broker_apis_to_use(_KafkaProduceV0.api_key())? as
@@ -966,7 +969,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     end
     if _pending_buffer.size() == 0 then
       // initialize pending buffer
-      _pending_buffer.push((0, 0, Map[String, Map[I32,
+      _pending_buffer.push((0, 0, Map[String, Map[KafkaPartitionId,
         Array[ProducerKafkaMessage val]]]))
     end
 
@@ -981,7 +984,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     end
 
 
-  fun ref produce_messages(size: I32, num_msgs: U64, msgs: Map[String, Map[I32,
+  fun ref produce_messages(size: I32, num_msgs: U64, msgs: Map[String, Map[KafkaPartitionId,
     Array[ProducerKafkaMessage val]]]): (Array[ByteSeq] val | None)
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name + "producing messages")
@@ -1050,7 +1053,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
     let correlation_id = _next_correlation_id()
 
-    let fetch_request = fetch_api.encode_request(correlation_id, _conf, _state.topics_state)
+    let fetch_request = fetch_api.encode_request(correlation_id, _conf, _state.topics_state, _state.rng)
 
     // only add correlation id to requests buffer if there was actually a fetch request
     if fetch_request isnt None then
@@ -1060,7 +1063,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     consume fetch_request
 
   // update brokers list based on what main kafka client actor knows
-  fun ref update_brokers_list(brokers_list: Map[I32, (_KafkaBroker val,
+  fun ref update_brokers_list(brokers_list: Map[KafkaNodeId, (_KafkaBroker val,
     KafkaBrokerConnection tag)] val)
   =>
     _brokers = brokers_list
@@ -1146,9 +1149,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name +
       "Updating metadata...")
-    let topics_to_throttle: Map[String, Set[I32] iso] iso =
+    let topics_to_throttle: Map[String, Set[KafkaPartitionId] iso] iso =
       recover topics_to_throttle.create() end
-    let topics_to_unthrottle: Map[String, Set[I32] iso] iso =
+    let topics_to_unthrottle: Map[String, Set[KafkaPartitionId] iso] iso =
       recover topics_to_unthrottle.create() end
     var new_partition_added: Bool = false
     var have_valid_partition: Bool = false
@@ -1257,7 +1260,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
           // broker will automagically pause fetch requests for this
           // partition because leader will be set to -1
           if not topics_to_throttle.contains(topic) then
-            topics_to_throttle(topic) = recover Set[I32] end
+            topics_to_throttle(topic) = recover Set[KafkaPartitionId] end
           end
           try
             topics_to_throttle(topic)?.set(partition_id)
@@ -1290,7 +1293,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
             // Tell kafka client to unthrottle
             if not topics_to_unthrottle.contains(topic) then
-              topics_to_unthrottle(topic) = recover Set[I32] end
+              topics_to_unthrottle(topic) = recover Set[KafkaPartitionId] end
             end
             try
               topics_to_unthrottle(topic)?.set(partition_id)
@@ -1312,7 +1315,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
               let lcpm = part_state.leader_change_pending_messages =
                 part_state.leader_change_pending_messages.create()
               let partition_msgs = recover iso
-                  Map[I32, Array[ProducerKafkaMessage val] iso]
+                  Map[KafkaPartitionId, Array[ProducerKafkaMessage val] iso]
                 end
               let lc_msgs = recover iso Array[ProducerKafkaMessage val] end
               for m in lcsm.values() do
@@ -1369,7 +1372,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
               let lcpm = part_state.leader_change_pending_messages =
                 part_state.leader_change_pending_messages.create()
               let partition_msgs = recover iso
-                  Map[I32, Array[ProducerKafkaMessage val] iso]
+                  Map[KafkaPartitionId, Array[ProducerKafkaMessage val] iso]
                 end
               let lc_msgs = recover iso Array[ProducerKafkaMessage val] end
               for m in lcsm.values() do
@@ -1386,7 +1389,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
                 consume val partition_msgs, part_state.request_offset)
             else
               new_leader_broker_tag._leader_change_msgs(meta, topic, partition_id,
-                recover val Map[I32, Array[ProducerKafkaMessage val] iso] end, part_state.request_offset)
+                recover val Map[KafkaPartitionId, Array[ProducerKafkaMessage val] iso] end, part_state.request_offset)
             end
           end
         end
@@ -1440,8 +1443,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
       end
     end
 
-  fun ref _leader_change_msgs(meta: _KafkaMetadata val, topic: String, partition_id: I32,
-    msgs: Map[I32, Array[ProducerKafkaMessage val] iso] val, request_offset: I64,
+  fun ref _leader_change_msgs(meta: _KafkaMetadata val, topic: String, partition_id: KafkaPartitionId,
+    msgs: Map[KafkaPartitionId, Array[ProducerKafkaMessage val] iso] val, request_offset: KafkaOffset,
     conn: KafkaBrokerConnection ref)
   =>
     _conf.logger(Warn) and _conf.logger.log(Warn, _name +
@@ -1497,9 +1500,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
     end
 
     // tell kafka client to unthrottle topic/partitions
-    let topics_to_unthrottle: Map[String, Set[I32] iso] iso =
+    let topics_to_unthrottle: Map[String, Set[KafkaPartitionId] iso] iso =
       recover topics_to_unthrottle.create() end
-    topics_to_unthrottle(topic) = recover Set[I32] end
+    topics_to_unthrottle(topic) = recover Set[KafkaPartitionId] end
 
     for part_id in msgs.keys() do
       try
@@ -1607,21 +1610,21 @@ class _KafkaHandler is CustomTCPConnectionNotify
 // due to too much buffering?
 // * is this needed if we throttle due to network congestion?
 
-  fun ref _leader_change_throttle_ack(topics_to_throttle: Map[String, Set[I32]
+  fun ref _leader_change_throttle_ack(topics_to_throttle: Map[String, Set[KafkaPartitionId]
     iso] val, conn: KafkaBrokerConnection ref)
   =>
     // TODO: implement throttle ack and send state over to new leader logic
     None
 
   fun ref process_produce_response(produce_response: Map[String,
-    _KafkaTopicProduceResponse], throttle_time: I32, msgs: Map[String, Map[I32,
+    _KafkaTopicProduceResponse], throttle_time: I32, msgs: Map[String, Map[KafkaPartitionId,
     Array[ProducerKafkaMessage val]]], conn: KafkaBrokerConnection ref)
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name +
       "processing produce response and sending delivery reports.")
     // TODO: Add logic to handle errors that can be handled by client
     // automagically
-    let topics_to_throttle: Map[String, Set[I32] iso] iso =
+    let topics_to_throttle: Map[String, Set[KafkaPartitionId] iso] iso =
       recover topics_to_throttle.create() end
     for (topic, topic_response) in produce_response.pairs() do
       let topic_state = try _state.topics_state(topic)?
@@ -1671,7 +1674,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
           // broker will automagically pause fetch requests for this
           // partition because leader will be set to -1
           if not topics_to_throttle.contains(topic) then
-            topics_to_throttle(topic) = recover Set[I32] end
+            topics_to_throttle(topic) = recover Set[KafkaPartitionId] end
           end
           try
             topics_to_throttle(topic)?.set(part)
@@ -1709,7 +1712,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     end
 
   fun ref handle_partition_leader_change(conn: KafkaBrokerConnection ref,
-    kafka_error: KafkaError, topic: String, partition_id: I32, msgs:
+    kafka_error: KafkaError, topic: String, partition_id: KafkaPartitionId, msgs:
     Array[ProducerKafkaMessage val],
     partition_state: _KafkaTopicPartitionState)
   =>
@@ -1740,7 +1743,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       " and partition: " + partition_id.string() + "!")
 
   fun ref handle_partition_leader_change_pending_buffer(topic: String,
-    partition_id: I32, partition_state: _KafkaTopicPartitionState)
+    partition_id: KafkaPartitionId, partition_state: _KafkaTopicPartitionState)
   =>
     // search through _pending_buffer to find messages for
     // this topic/partition to save into leader_change_pending_messages
@@ -1772,7 +1775,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
   =>
     _conf.logger(Fine) and _conf.logger.log(Fine, _name +
       "processing and distributing fetched data")
-    let topics_to_throttle: Map[String, Set[I32] iso] iso =
+    let topics_to_throttle: Map[String, Set[KafkaPartitionId] iso] iso =
       recover topics_to_throttle.create() end
     for (topic, topic_result) in fetch_results.pairs() do
       let ts = try _state.topics_state(topic)?
@@ -1859,7 +1862,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
               // broker will automagically pause fetch requests for this
               // partition because leader will be set to -1
               if not topics_to_throttle.contains(topic) then
-                topics_to_throttle(topic) = recover Set[I32] end
+                topics_to_throttle(topic) = recover Set[KafkaPartitionId] end
               end
               try
                 topics_to_throttle(topic)?.set(part)
@@ -1906,7 +1909,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
        _state.consumer_unacked_offsets(msg._get_topic_partition())?
          .set(msg.get_offset())
     else
-      let po = recover Set[I64] end
+      let po = recover Set[KafkaOffset] end
       po.set(msg.get_offset())
       _state.consumer_unacked_offsets(msg._get_topic_partition()) = consume po
     end
@@ -2141,7 +2144,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
             return
           end
         (let size, let num_msgs, let msgs) = match extra_request_data
-          | (let s: I32, let n: U64, let m: Map[String, Map[I32,
+          | (let s: I32, let n: U64, let m: Map[String, Map[KafkaPartitionId,
             Array[ProducerKafkaMessage val]]]) => (s, n, m)
           else
             _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name + "Error " +
@@ -2183,8 +2186,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
   // assign proper api versions to use after getting supported version info from
   // broker
-  fun ref update_api_versions_to_use(api_versions_supported: Array[(I16, I16,
-    I16)])
+  fun ref update_api_versions_to_use(api_versions_supported: Array[(KafkaApiKey, KafkaApiVersion,
+    KafkaApiVersion)])
   =>
     _broker_apis_to_use.clear()
     for (api_key, min_version, max_version) in api_versions_supported.values()

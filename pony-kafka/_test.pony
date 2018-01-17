@@ -59,12 +59,12 @@ actor TestP is KafkaProducer
 
   fun ref producer_mapping(): (KafkaProducerMapping | None) => None
 
-  fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[I32, I32]]
+  fun ref _kafka_producer_throttled(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
     val)
   =>
     None
 
-  fun ref _kafka_producer_unthrottled(topic_mapping: Map[String, Map[I32, I32]]
+  fun ref _kafka_producer_unthrottled(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
     val, fully_unthrottled: Bool)
   =>
     None
@@ -72,7 +72,7 @@ actor TestP is KafkaProducer
 
 primitive DataGen
   // generate data
-  fun generate_data(p: KafkaProducer tag = TestP): Map[String, Map[I32,
+  fun generate_data(p: KafkaProducer tag = TestP): Map[String, Map[KafkaPartitionId,
     Array[ProducerKafkaMessage val]]]
   =>
     let msgs = Array[ProducerKafkaMessage val]
@@ -127,10 +127,10 @@ primitive DataGen
     msgs.push(recover iso ProducerKafkaMessage(p, a, a, a.size()) end)
     i = i + 1
 
-    let part_msgs: Map[I32, Array[ProducerKafkaMessage val]] = Map[I32,
-      Array[ProducerKafkaMessage val]]
-    let topics_msgs: Map[String, Map[I32, Array[ProducerKafkaMessage val]]]=
-      Map[String, Map[I32, Array[ProducerKafkaMessage val]]]
+    let part_msgs: Map[KafkaPartitionId, Array[ProducerKafkaMessage val]] =
+      part_msgs.create()
+    let topics_msgs: Map[String, Map[KafkaPartitionId, Array[ProducerKafkaMessage val]]] =
+      topics_msgs.create()
 
     part_msgs(0) = consume msgs
 
@@ -139,10 +139,10 @@ primitive DataGen
     topics_msgs
 
   fun generate_random_data(topic: String, msg_size: USize, num_msgs: USize, p:
-    KafkaProducer tag = TestP): Map[I32, Array[ProducerKafkaMessage val] iso]
+    KafkaProducer tag = TestP): Map[KafkaPartitionId, Array[ProducerKafkaMessage val] iso]
     val ?
   =>
-    let part_msgs: Map[I32, Array[ProducerKafkaMessage val] iso] iso = recover
+    let part_msgs: Map[KafkaPartitionId, Array[ProducerKafkaMessage val] iso] iso = recover
       iso part_msgs.create() end
     part_msgs(0) = recover iso Array[ProducerKafkaMessage val] end
 
@@ -161,18 +161,18 @@ primitive _RunOffsetsApiTest
   """
   fun apply(h: TestHelper, api_to_use: _KafkaOffsetsApi) ? =>
     let logger = StringLogger(Warn, h.env.out)
-    var correlation_id: I32 = 9
+    var correlation_id: KafkaCorrelationId = 9
 
     let topic: String = "test"
     let topic2: String = "test2"
-    let partition_id: I32 = 0
+    let partition_id: KafkaPartitionId = 0
 
     let state = _KafkaState
 
     let topic_state = _KafkaTopicState(topic,
       KafkaRoundRobinConsumerMessageHandler)
     let topic_partition_state = _KafkaTopicPartitionState(0, partition_id, 0,
-      recover Array[I32] end, recover Array[I32] end)
+      recover Array[KafkaNodeId] end, recover Array[KafkaNodeId] end)
     topic_partition_state.current_leader = true
     topic_state.partitions_state(partition_id) = topic_partition_state
     state.topics_state(topic) = topic_state
@@ -180,7 +180,7 @@ primitive _RunOffsetsApiTest
     let topic2_state = _KafkaTopicState(topic2,
       KafkaRoundRobinConsumerMessageHandler)
     let topic2_partition_state = _KafkaTopicPartitionState(0, partition_id, 0,
-      recover Array[I32] end, recover Array[I32] end)
+      recover Array[KafkaNodeId] end, recover Array[KafkaNodeId] end)
     topic2_partition_state.current_leader = false
     topic2_state.partitions_state(partition_id) = topic2_partition_state
     state.topics_state(topic2) = topic2_state
@@ -227,21 +227,21 @@ primitive _RunOffsetsApiTest
     (let api_key', let api_version', let correlation_id', let client_name') =
       _KafkaRequestHeader.decode(logger, rb)?
 
-    h.assert_eq[I16](api_key', api_to_use.api_key())
-    h.assert_eq[I16](api_version', api_to_use.version())
-    h.assert_eq[I32](correlation_id', correlation_id)
+    h.assert_eq[KafkaApiKey](api_key', api_to_use.api_key())
+    h.assert_eq[KafkaApiVersion](api_version', api_to_use.version())
+    h.assert_eq[KafkaCorrelationId](correlation_id', correlation_id)
     h.assert_eq[String](client_name', conf.client_name)
 
     (let replica_id', let topics_requested') = api_to_use.decode_request(logger,
       rb)?
-    h.assert_eq[I32](replica_id', conf.replica_id)
+    h.assert_eq[KafkaNodeId](replica_id', conf.replica_id)
 
     for (t, ts) in state.topics_state.pairs() do
       for (part_id, part_state) in ts.partitions_state.pairs() do
         if part_state.current_leader then
           (let request_timestamp', let num_requested') =
             topics_requested'(t)?(part_id)?
-          h.assert_eq[I64](request_timestamp', part_state.request_timestamp)
+          h.assert_eq[KafkaTimestamp](request_timestamp', part_state.request_timestamp)
           h.assert_eq[I32](num_requested', 1)
         end
       end
@@ -259,7 +259,7 @@ primitive _RunProduceApiTest
 
     let logger = StringLogger(Warn, h.env.out)
     let msgs = DataGen.generate_data()
-    var correlation_id: I32 = 9
+    var correlation_id: KafkaCorrelationId = 9
 
     let topic: String = "test"
 
@@ -299,9 +299,9 @@ primitive _RunProduceApiTest
     (let api_key', let api_version', let correlation_id', let client_name') =
       _KafkaRequestHeader.decode(logger, rb)?
 
-    h.assert_eq[I16](api_key', api_to_use.api_key())
-    h.assert_eq[I16](api_version', api_to_use.version())
-    h.assert_eq[I32](correlation_id', correlation_id)
+    h.assert_eq[KafkaApiKey](api_key', api_to_use.api_key())
+    h.assert_eq[KafkaApiVersion](api_version', api_to_use.version())
+    h.assert_eq[KafkaCorrelationId](correlation_id', correlation_id)
     h.assert_eq[String](client_name', conf.client_name)
 
     let broker_conn = _MockKafkaBrokerConnection
@@ -534,18 +534,18 @@ primitive _ProduceApiCombineSplitTest
   fun apply(h: TestHelper, api_to_use: _KafkaProduceApi) ? =>
     let consumers = recover iso Array[KafkaConsumer tag] end
     let logger = StringLogger(Warn, h.env.out)
-    var correlation_id: I32 = 9
+    var correlation_id: KafkaCorrelationId = 9
 
     let topic: String = "test"
     let topic2: String = "test2"
-    let partition_id: I32 = 0
+    let partition_id: KafkaPartitionId = 0
 
     let state = _KafkaState
 
     let topic_state = _KafkaTopicState(topic,
       KafkaRoundRobinConsumerMessageHandler)
     let topic_partition_state = _KafkaTopicPartitionState(0, partition_id, 0,
-      recover Array[I32] end, recover Array[I32] end)
+      recover Array[KafkaNodeId] end, recover Array[KafkaNodeId] end)
     topic_partition_state.current_leader = true
     topic_partition_state.leader_change = false
     topic_state.partitions_state(partition_id) = topic_partition_state
@@ -554,7 +554,7 @@ primitive _ProduceApiCombineSplitTest
     let topic2_state = _KafkaTopicState(topic2,
       KafkaRoundRobinConsumerMessageHandler)
     let topic2_partition_state = _KafkaTopicPartitionState(0, partition_id, 0,
-      recover Array[I32] end, recover Array[I32] end)
+      recover Array[KafkaNodeId] end, recover Array[KafkaNodeId] end)
     topic2_partition_state.current_leader = false
     topic2_partition_state.leader_change = false
     topic2_state.partitions_state(partition_id) = topic2_partition_state
@@ -582,11 +582,11 @@ primitive _ProduceApiCombineSplitTest
         kc
       end
 
-    let pending_buffer: Array[(I32, U64, Map[String, Map[I32,
+    let pending_buffer: Array[(I32, U64, Map[String, Map[KafkaPartitionId,
       Array[ProducerKafkaMessage val]]])] = pending_buffer.create()
 
     // initialize pending buffer
-    pending_buffer.push((0, 0, Map[String, Map[I32, Array[ProducerKafkaMessage
+    pending_buffer.push((0, 0, Map[String, Map[KafkaPartitionId, Array[ProducerKafkaMessage
       val]]]))
 
 
@@ -648,7 +648,7 @@ primitive _ProduceApiCombineSplitTest
     end
 
     pending_buffer.clear()
-    pending_buffer.push((0, 0, Map[String, Map[I32, Array[ProducerKafkaMessage
+    pending_buffer.push((0, 0, Map[String, Map[KafkaPartitionId, Array[ProducerKafkaMessage
       val]]]))
 
     for (part_id, p_msgs) in msgs.pairs() do
@@ -694,7 +694,7 @@ primitive _ProduceApiCombineSplitTest
     end
 
     pending_buffer.clear()
-    pending_buffer.push((0, 0, Map[String, Map[I32, Array[ProducerKafkaMessage
+    pending_buffer.push((0, 0, Map[String, Map[KafkaPartitionId, Array[ProducerKafkaMessage
       val]]]))
 
     for (part_id, p_msgs) in msgs.pairs() do

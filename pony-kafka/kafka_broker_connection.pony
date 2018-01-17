@@ -24,7 +24,7 @@ use "collections"
 // connection
 trait KafkaBrokerConnection is CustomTCPConnection
   // behavior to update the internal brokers list
-  be _update_brokers_list(brokers_list: Map[I32, (_KafkaBroker val,
+  be _update_brokers_list(brokers_list: Map[KafkaNodeId, (_KafkaBroker val,
     KafkaBrokerConnection tag)] val)
   =>
     try
@@ -33,7 +33,7 @@ trait KafkaBrokerConnection is CustomTCPConnection
     end
 
   // behavior to send messages to kafka brokers
-  be send_kafka_messages(topic: String, msgs_to_send: Map[I32,
+  be send_kafka_messages(topic: String, msgs_to_send: Map[KafkaPartitionId,
     Array[ProducerKafkaMessage val] iso] val, auth: _KafkaProducerAuth)
   =>
     try
@@ -41,7 +41,7 @@ trait KafkaBrokerConnection is CustomTCPConnection
         _KafkaHandler).send_kafka_messages(this, topic, msgs_to_send, auth)?
     end
 
-  be send_kafka_message(topic: String, partition_id: I32,
+  be send_kafka_message(topic: String, partition_id: KafkaPartitionId,
     msg_to_send: ProducerKafkaMessage val, auth: _KafkaProducerAuth)
   =>
     try
@@ -74,7 +74,7 @@ trait KafkaBrokerConnection is CustomTCPConnection
         _KafkaHandler)._update_consumers(topic_consumers)
     end
 
-  be _consumer_pause(topic: String, partition_id: I32) =>
+  be _consumer_pause(topic: String, partition_id: KafkaPartitionId) =>
     try
       ((get_handler() as CustomTCPConnectionHandler).notify as
         _KafkaHandler)._consumer_pause(this, topic, partition_id)
@@ -86,7 +86,7 @@ trait KafkaBrokerConnection is CustomTCPConnection
         _KafkaHandler)._consumer_pause_all(this)
     end
 
-  be _consumer_resume(topic: String, partition_id: I32) =>
+  be _consumer_resume(topic: String, partition_id: KafkaPartitionId) =>
     try
       ((get_handler() as CustomTCPConnectionHandler).notify as
         _KafkaHandler)._consumer_resume(this, topic, partition_id)
@@ -116,7 +116,7 @@ trait KafkaBrokerConnection is CustomTCPConnection
         _KafkaHandler)._send_pending_messages(this)?
     end
 
-  be _leader_change_throttle_ack(topics_to_throttle: Map[String, Set[I32] iso]
+  be _leader_change_throttle_ack(topics_to_throttle: Map[String, Set[KafkaPartitionId] iso]
     val)
   =>
     try
@@ -131,8 +131,8 @@ trait KafkaBrokerConnection is CustomTCPConnection
         _KafkaHandler)._update_metadata(meta, this)
     end
 
-  be _leader_change_msgs(meta: _KafkaMetadata val, topic: String, partition_id: I32,
-    msgs: Map[I32, Array[ProducerKafkaMessage val] iso] val, request_offset: I64)
+  be _leader_change_msgs(meta: _KafkaMetadata val, topic: String, partition_id: KafkaPartitionId,
+    msgs: Map[KafkaPartitionId, Array[ProducerKafkaMessage val] iso] val, request_offset: KafkaOffset)
   =>
     try
       ((get_handler() as CustomTCPConnectionHandler).notify as
