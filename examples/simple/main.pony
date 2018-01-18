@@ -61,7 +61,7 @@ actor Main is KafkaClientManager
       _kc = kc
     end
 
-  be receive_kafka_topics_partitions(topic_partitions: Map[String,
+  be receive_kafka_topics_partitions(client: KafkaClient, topic_partitions: Map[String,
     (KafkaTopicType, Set[KafkaPartitionId])] val) =>
     match _kc
     | let kc: KafkaClient tag =>
@@ -74,7 +74,7 @@ actor Main is KafkaClientManager
       kc.consumer_resume_all()
     end
 
-  be kafka_client_error(error_report: KafkaErrorReport) =>
+  be kafka_client_error(client: KafkaClient, error_report: KafkaErrorReport) =>
     None
 
 // kafka consumer actor
@@ -90,7 +90,7 @@ actor C is KafkaConsumer
 
   // behavior kafka calls for each message received that should be sent to this
   // actor
-  be receive_kafka_message(value: Array[U8] iso, key: (Array[U8] val | None), msg_metadata: KafkaMessageMetadata val,
+  be receive_kafka_message(client: KafkaClient, value: Array[U8] iso, key: (Array[U8] val | None), msg_metadata: KafkaMessageMetadata val,
     network_received_timestamp: U64)
   =>
     logger(Fine) and logger.log(Fine, "Received kafka message")
@@ -116,26 +116,26 @@ actor P is KafkaProducer
   new create(logger': Logger[String]) =>
     logger = logger'
 
-  fun ref create_producer_mapping(mapping: KafkaProducerMapping):
+  fun ref create_producer_mapping(client: KafkaClient, mapping: KafkaProducerMapping):
     (KafkaProducerMapping | None)
   =>
     _kafka_producer_mapping = mapping
 
-  fun ref producer_mapping(): (KafkaProducerMapping | None) =>
+  fun ref producer_mapping(client: KafkaClient): (KafkaProducerMapping | None) =>
     _kafka_producer_mapping
 
-  fun ref _kafka_producer_throttled(topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
+  fun ref _kafka_producer_throttled(client: KafkaClient, topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
   =>
     None
 
-  fun ref _kafka_producer_unthrottled(topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
+  fun ref _kafka_producer_unthrottled(client: KafkaClient, topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
   =>
     None
 
-  be kafka_producer_ready() =>
+  be kafka_producer_ready(client: KafkaClient) =>
     produce_data()
 
-  be kafka_message_delivery_report(delivery_report: KafkaProducerDeliveryReport)
+  be kafka_message_delivery_report(client: KafkaClient, delivery_report: KafkaProducerDeliveryReport)
   =>
     if not (delivery_report.status is ErrorNone) then
       logger(Error) and logger.log(Error, "received delivery report: " +
