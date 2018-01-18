@@ -172,7 +172,7 @@ actor Main is (KafkaClientManager & KafkaNetworkSniffer)
         + help)
     end
 
-  be data_sent(broker_id: KafkaNodeId, data: ByteSeqIter) =>
+  be data_sent(client: KafkaClient, broker_id: KafkaNodeId, data: ByteSeqIter) =>
     try
       let file = try _sniffing_output_files(broker_id)?
         else
@@ -184,10 +184,10 @@ actor Main is (KafkaClientManager & KafkaNetworkSniffer)
         file.writev(data)
     end
 
-  be data_received(broker_id: KafkaNodeId, data: Array[U8] iso) =>
+  be data_received(client: KafkaClient, broker_id: KafkaNodeId, data: Array[U8] iso) =>
     None
 
-  be receive_kafka_topics_partitions(topic_partitions: Map[String,
+  be receive_kafka_topics_partitions(client: KafkaClient, topic_partitions: Map[String,
     (KafkaTopicType, Set[KafkaPartitionId])] val) =>
     if _client_mode == "consumer" then
       match _kc
@@ -202,7 +202,7 @@ actor Main is (KafkaClientManager & KafkaNetworkSniffer)
       end
     end
 
-  be kafka_client_error(error_report: KafkaErrorReport) =>
+  be kafka_client_error(client: KafkaClient, error_report: KafkaErrorReport) =>
     @printf[I32]("Kafka client error\n".cstring())
 
 
@@ -249,7 +249,7 @@ actor C is KafkaConsumer
 
   // behavior kafka calls for each message received that should be sent to this
   // actor
-  be receive_kafka_message(value: Array[U8] iso, key: (Array[U8] val | None), msg_metadata: KafkaMessageMetadata val,
+  be receive_kafka_message(client: KafkaClient, value: Array[U8] iso, key: (Array[U8] val | None), msg_metadata: KafkaMessageMetadata val,
     network_received_timestamp: U64)
   =>
     num_msgs_consumed = num_msgs_consumed + 1
@@ -327,7 +327,7 @@ actor P is KafkaProducer
       @printf[I32]("\n".cstring())
     end
 
-  fun ref create_producer_mapping(mapping: KafkaProducerMapping):
+  fun ref create_producer_mapping(client: KafkaClient, mapping: KafkaProducerMapping):
     (KafkaProducerMapping | None)
   =>
     ifdef debug then
@@ -335,10 +335,10 @@ actor P is KafkaProducer
     end
     _kafka_producer_mapping = mapping
 
-  fun ref producer_mapping(): (KafkaProducerMapping | None) =>
+  fun ref producer_mapping(client: KafkaClient): (KafkaProducerMapping | None) =>
     _kafka_producer_mapping
 
-  fun ref _kafka_producer_throttled(topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
+  fun ref _kafka_producer_throttled(client: KafkaClient, topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
   =>
     ifdef debug then
       @printf[I32]("Producer throttled\n".cstring())
@@ -348,7 +348,7 @@ actor P is KafkaProducer
       _throttled = true
     end
 
-  fun ref _kafka_producer_unthrottled(topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
+  fun ref _kafka_producer_unthrottled(client: KafkaClient, topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
   =>
     ifdef debug then
       @printf[I32](("Producer unthrottled. num partitions throttled: " + topic_partitions_throttled.size().string() + "\n").cstring())
@@ -361,12 +361,12 @@ actor P is KafkaProducer
       end
     end
 
-  be kafka_producer_ready() =>
+  be kafka_producer_ready(client: KafkaClient) =>
     @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Producing data\n").cstring())
     start_ts = Time.nanos()
     produce_data()
 
-  be kafka_message_delivery_report(delivery_report: KafkaProducerDeliveryReport)
+  be kafka_message_delivery_report(client: KafkaClient, delivery_report: KafkaProducerDeliveryReport)
   =>
     num_msgs_produced_acked = num_msgs_produced_acked + 1
     if not (delivery_report.status is ErrorNone) then

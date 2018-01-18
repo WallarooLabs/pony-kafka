@@ -497,7 +497,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
           c
         end
 
-        ns.data_received(_connection_broker_id, consume copy)
+        ns.data_received(_kafka_client, _connection_broker_id, consume copy)
       end
     end
 
@@ -979,7 +979,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     ifdef "enable-kafka-network-sniffing" then
       match _conf.network_sniffer
       | let ns: KafkaNetworkSniffer tag =>
-        ns.data_sent(_connection_broker_id, data)
+        ns.data_sent(_kafka_client, _connection_broker_id, data)
       end
     end
 
@@ -1015,7 +1015,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       for (t, tm) in msgs.pairs() do
         for (p, pm) in tm.pairs() do
           for m in pm.values() do
-            m._send_delivery_report(KafkaProducerDeliveryReport(ErrorNone, t, p,
+            m._send_delivery_report(_kafka_client, KafkaProducerDeliveryReport(ErrorNone, t, p,
                -1, -1, m.get_opaque()))
           end
         end
@@ -1660,7 +1660,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
         match kafka_error
         | ErrorNone =>
           for (i, m) in partition_msgs.pairs() do
-            m._send_delivery_report(KafkaProducerDeliveryReport(kafka_error,
+            m._send_delivery_report(_kafka_client, KafkaProducerDeliveryReport(kafka_error,
               topic, part, part_response.offset + i.i64(),
               part_response.timestamp, m.get_opaque()))
           end
@@ -1693,7 +1693,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
             " and partition: " + part.string() + " error: " +
             kafka_error.string())
           for (i, m) in partition_msgs.pairs() do
-            m._send_delivery_report(KafkaProducerDeliveryReport(kafka_error,
+            m._send_delivery_report(_kafka_client, KafkaProducerDeliveryReport(kafka_error,
               topic, part, part_response.offset + i.i64(),
               part_response.timestamp, m.get_opaque()))
           end
@@ -1829,7 +1829,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
 /* this is related to consumer offset tracking and might get revived when group consumer support is added
                 track_consumer_unacked_message(m)
 */
-                c.receive_kafka_message(consume v, consume key', meta, network_received_timestamp)
+                c.receive_kafka_message(_kafka_client, consume v, consume key', meta, network_received_timestamp)
               else
                 _conf.logger(Fine) and _conf.logger.log(Fine, _name +
                   "Ignoring message because consumer_message_handler returned"

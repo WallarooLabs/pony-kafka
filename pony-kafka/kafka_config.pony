@@ -56,8 +56,8 @@ primitive _KafkaProducerAuth
 
 // trait for a network sniffer for sniffing/logging kafka network traffic
 trait KafkaNetworkSniffer
-  be data_sent(broker_id: KafkaNodeId, data: ByteSeqIter)
-  be data_received(broker_id: KafkaNodeId, data: Array[U8] iso)
+  be data_sent(client: KafkaClient, broker_id: KafkaNodeId, data: ByteSeqIter)
+  be data_received(client: KafkaClient, broker_id: KafkaNodeId, data: Array[U8] iso)
 
 // trait for a kafka client manager (this will get adminitrative messages)
 trait KafkaClientManager
@@ -65,29 +65,29 @@ trait KafkaClientManager
   // the manager gets informed whenenever the topic/partition list
   // changes. It is the reponsibility of the manager to tell the
   // client consumer to resume the new partitions if desired.
-  be receive_kafka_topics_partitions(topic_partitions: Map[String,
+  be receive_kafka_topics_partitions(client: KafkaClient, topic_partitions: Map[String,
     (KafkaTopicType, Set[KafkaPartitionId])] val)
 
   // unrecoverable client error
-  be kafka_client_error(error_report: KafkaErrorReport)
+  be kafka_client_error(client: KafkaClient, error_report: KafkaErrorReport)
 
 // trait for a kafka consumer
 trait KafkaConsumer
-  be receive_kafka_message(value: Array[U8] iso, key: (Array[U8] val | None), msg_metadata: KafkaMessageMetadata val,
+  be receive_kafka_message(client: KafkaClient, value: Array[U8] iso, key: (Array[U8] val | None), msg_metadata: KafkaMessageMetadata val,
     network_received_timestamp: U64)
 
 // trait for a kafka producer
 trait KafkaProducer
-  fun ref create_producer_mapping(mapping: KafkaProducerMapping):
+  fun ref create_producer_mapping(client: KafkaClient, mapping: KafkaProducerMapping):
     (KafkaProducerMapping | None)
 
-  fun ref producer_mapping(): (KafkaProducerMapping | None)
+  fun ref producer_mapping(client: KafkaClient): (KafkaProducerMapping | None)
 
   // called by kafka client to let producers know of updated producer mapping
-  be _create_producer_mapping(mapping: KafkaProducerMapping iso,
+  be _create_producer_mapping(client: KafkaClient, mapping: KafkaProducerMapping iso,
     topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
   =>
-    let old = create_producer_mapping(consume mapping)
+    let old = create_producer_mapping(client, consume mapping)
 
     match old
     | let pm: KafkaProducerMapping =>
@@ -95,60 +95,60 @@ trait KafkaProducer
       pm.conf.logger.log(Error, "Created producer mapping when it has " +
       "already been created. This should never happen.")
     else
-      kafka_producer_ready()
+      kafka_producer_ready(client)
     end
 
-    _kafka_producer_throttled(topic_partitions_throttled)
+    _kafka_producer_throttled(client, topic_partitions_throttled)
 
-  be _update_brokers_and_topic_mapping(brokers: Map[KafkaNodeId, (_KafkaBroker val,
+  be _update_brokers_and_topic_mapping(client: KafkaClient, brokers: Map[KafkaNodeId, (_KafkaBroker val,
     KafkaBrokerConnection tag)] val, topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]]
     val, topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
   =>
-    let pm = producer_mapping()
+    let pm = producer_mapping(client)
     match pm
     | let pm': KafkaProducerMapping =>
-      pm'.update_brokers_and_topic_mapping(brokers, topic_mapping)
+      pm'.update_brokers_and_topic_mapping(client, brokers, topic_mapping)
     end
 
-    _kafka_producer_throttled(topic_partitions_throttled)
+    _kafka_producer_throttled(client, topic_partitions_throttled)
 
-  be kafka_producer_ready()
+  be kafka_producer_ready(client: KafkaClient)
 
-  be kafka_message_delivery_report(delivery_report: KafkaProducerDeliveryReport)
+  be kafka_message_delivery_report(client: KafkaClient, delivery_report: KafkaProducerDeliveryReport)
 
-  be _kafka_producer_throttle(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val,
+  be _kafka_producer_throttle(client: KafkaClient, topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val,
     topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val,
-    ack_requested: Bool, client: KafkaClient, p: KafkaProducer tag)
+    ack_requested: Bool, p: KafkaProducer tag)
   =>
-    let pm = producer_mapping()
+    let pm = producer_mapping(client)
     match pm
-    | let pm': KafkaProducerMapping => pm'.update_topic_mapping(topic_mapping)
+    | let pm': KafkaProducerMapping => pm'.update_topic_mapping(client, topic_mapping)
     end
 
     if ack_requested then
       client.throttle_ack(topic_mapping, this, p)
     end
 
-    _kafka_producer_throttled(topic_partitions_throttled)
+    _kafka_producer_throttled(client, topic_partitions_throttled)
 
-  fun ref _kafka_producer_throttled(topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
+  fun ref _kafka_producer_throttled(client: KafkaClient, topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
 
-  be _kafka_producer_unthrottle(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val,
+  be _kafka_producer_unthrottle(client: KafkaClient, topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val,
     topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val,
-    ack_requested: Bool, client: KafkaClient, p: KafkaProducer tag)
+    ack_requested: Bool, p: KafkaProducer tag)
   =>
-    let pm = producer_mapping()
+    let pm = producer_mapping(client)
     match pm
-    | let pm': KafkaProducerMapping => pm'.update_topic_mapping(topic_mapping)
+    | let pm': KafkaProducerMapping => pm'.update_topic_mapping(client, topic_mapping)
     end
 
     if ack_requested then
       client.unthrottle_ack(topic_mapping, this, p)
     end
 
-    _kafka_producer_unthrottled(topic_partitions_throttled)
+    _kafka_producer_unthrottled(client, topic_partitions_throttled)
 
-  fun ref _kafka_producer_unthrottled(topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
+  fun ref _kafka_producer_unthrottled(client: KafkaClient, topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
 
 // trait for a class that can handle kafka messages on produce (assigning
 // partition ids on send)
@@ -543,17 +543,33 @@ class KafkaProducerMapping
       end
     end
 
-  fun ref update_brokers_and_topic_mapping(
+  fun ref update_brokers_and_topic_mapping(client: KafkaClient,
      brokers': Map[KafkaNodeId, (_KafkaBroker val, KafkaBrokerConnection tag)] val,
      topic_mapping': Map[String, Map[KafkaPartitionId, KafkaNodeId]] val)
   =>
+    if client isnt kc then
+      kc._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(
+        "Error! 'client' != 'kc' in update_brokers_and_topic_mapping. This should never happen."),
+          "N/A", -1))
+      client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(
+        "Error! 'client' != 'kc' in update_brokers_and_topic_mapping. This should never happen."),
+          "N/A", -1))
+    end
     brokers = brokers'
-    update_topic_mapping(topic_mapping')
+    update_topic_mapping(kc, topic_mapping')
 
-  fun ref update_topic_mapping(topic_mapping': Map[String, Map[KafkaPartitionId, KafkaNodeId]] val)
+  fun ref update_topic_mapping(client: KafkaClient, topic_mapping': Map[String, Map[KafkaPartitionId, KafkaNodeId]] val)
   =>
     // TODO: Add logic to compare old and new topic mapping to identify newly
     // unthrottled partitions for which to send buffered messages
+    if client isnt kc then
+      kc._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(
+        "Error! 'client' != 'kc' in update_topic_mapping. This should never happen."),
+          "N/A", -1))
+      client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(
+        "Error! 'client' != 'kc' in update_topic_mapping. This should never happen."),
+          "N/A", -1))
+    end
     topic_mapping = topic_mapping'
 
   // main logic for sending messages to brokers
@@ -1213,12 +1229,12 @@ actor KafkaClient
 
         _topic_partitions_read_only = consume map_topic_partitions
 
-        _manager.receive_kafka_topics_partitions(_topic_partitions_read_only)
+        _manager.receive_kafka_topics_partitions(this, _topic_partitions_read_only)
       end
 
       // update producers with new info
       for p in _producers.values() do
-        p._update_brokers_and_topic_mapping(_brokers_read_only,
+        p._update_brokers_and_topic_mapping(this, _brokers_read_only,
           _topic_mapping_read_only, _topic_partitions_throttled_read_only)
       end
     end
@@ -1269,7 +1285,7 @@ actor KafkaClient
     // only send topic mapping if it's got valid partitions/topics for producing added to it
     if _topic_mapping_read_only.size() > 0 then
       for p in _producers.values() do
-        p._create_producer_mapping(recover iso KafkaProducerMapping(this, _conf,
+        p._create_producer_mapping(this, recover iso KafkaProducerMapping(this, _conf,
           _topic_mapping_read_only, _brokers_read_only, p) end, _topic_partitions_throttled_read_only)
       end
     end
@@ -1294,7 +1310,7 @@ actor KafkaClient
       end
 
       // create producer mapping
-      p._create_producer_mapping(recover iso KafkaProducerMapping(this, _conf,
+      p._create_producer_mapping(this, recover iso KafkaProducerMapping(this, _conf,
         _topic_mapping_read_only, _brokers_read_only, p) end, _topic_partitions_throttled_read_only)
     end
 
@@ -1331,7 +1347,7 @@ actor KafkaClient
     // send updated topic mapping to producers so they can pause/buffer
     // producing
     for p in _producers.values() do
-      p._kafka_producer_throttle(_topic_mapping_read_only, _topic_partitions_throttled_read_only, false, this, p)
+      p._kafka_producer_throttle(this, _topic_mapping_read_only, _topic_partitions_throttled_read_only, false, p)
     end
 
   // unthrottling without leader change (no ack confirmation from producers)
@@ -1357,7 +1373,7 @@ actor KafkaClient
 
     // send updated topic mapping to producers so they can resume producing
     for p in _producers.values() do
-      p._kafka_producer_unthrottle(_topic_mapping_read_only, _topic_partitions_throttled_read_only, false, this, p)
+      p._kafka_producer_unthrottle(this, _topic_mapping_read_only, _topic_partitions_throttled_read_only, false, p)
     end
 
   be _leader_change_throttle(topics_to_throttle: Map[String, Set[KafkaPartitionId] iso] val,
@@ -1397,7 +1413,7 @@ actor KafkaClient
     // send updated topic mapping to producers so they can pause/buffer
     // producing
     for p in _producers.values() do
-      p._kafka_producer_throttle(_topic_mapping_read_only, _topic_partitions_throttled_read_only, true, this, p)
+      p._kafka_producer_throttle(this, _topic_mapping_read_only, _topic_partitions_throttled_read_only, true, p)
     end
 
   be throttle_ack(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val, actual_p:
@@ -1470,7 +1486,7 @@ actor KafkaClient
 
     // send updated topic mapping to producers so they can resume producing
     for p in _producers.values() do
-      p._kafka_producer_unthrottle(_topic_mapping_read_only, _topic_partitions_throttled_read_only, true, this, p)
+      p._kafka_producer_unthrottle(this, _topic_mapping_read_only, _topic_partitions_throttled_read_only, true, p)
     end
 
   be unthrottle_ack(topic_mapping: Map[String, Map[KafkaPartitionId, KafkaNodeId]] val,
@@ -1534,7 +1550,7 @@ actor KafkaClient
         " recoverable error! " + error_report.string())
 
       // let manager know of the recoverable error
-      _manager.kafka_client_error(error_report)
+      _manager.kafka_client_error(this, error_report)
     end
 
   be _unrecoverable_error(error_report: KafkaErrorReport) =>
@@ -1545,7 +1561,7 @@ actor KafkaClient
     _conf.logger(Error) and _conf.logger.log(Error, "SHUTTING DOWN CLIENT!")
 
     // let manager know of the unrecoverable error
-    _manager.kafka_client_error(error_report)
+    _manager.kafka_client_error(this, error_report)
 
     // call dispose to clean up/shut down
     dispose()

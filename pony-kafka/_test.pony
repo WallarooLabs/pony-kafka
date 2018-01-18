@@ -48,22 +48,22 @@ actor TestP is KafkaProducer
   new create() =>
     None
 
-  fun ref create_producer_mapping(mapping: KafkaProducerMapping):
+  fun ref create_producer_mapping(client: KafkaClient, mapping: KafkaProducerMapping):
     (KafkaProducerMapping | None) => None
 
-  be kafka_producer_ready() => None
+  be kafka_producer_ready(client: KafkaClient) => None
 
-  be kafka_message_delivery_report(delivery_report: KafkaProducerDeliveryReport)
+  be kafka_message_delivery_report(client: KafkaClient, delivery_report: KafkaProducerDeliveryReport)
   =>
     None
 
-  fun ref producer_mapping(): (KafkaProducerMapping | None) => None
+  fun ref producer_mapping(client: KafkaClient): (KafkaProducerMapping | None) => None
 
-  fun ref _kafka_producer_throttled(topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
+  fun ref _kafka_producer_throttled(client: KafkaClient, topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
   =>
     None
 
-  fun ref _kafka_producer_unthrottled(topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
+  fun ref _kafka_producer_unthrottled(client: KafkaClient, topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val)
   =>
     None
 

@@ -241,8 +241,8 @@ class ProducerKafkaMessage
 
   fun val _get_created_by(): KafkaProducer tag => _created_by
 
-  fun val _send_delivery_report(delivery_report: KafkaProducerDeliveryReport) =>
-    _created_by.kafka_message_delivery_report(delivery_report)
+  fun val _send_delivery_report(client: KafkaClient, delivery_report: KafkaProducerDeliveryReport) =>
+    _created_by.kafka_message_delivery_report(client, delivery_report)
 
 type KafkaMessageOrError is (Array[U8] iso, (Array[U8] iso | None | KafkaError), KafkaMessageMetadata iso)
 
