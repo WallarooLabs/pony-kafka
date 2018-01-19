@@ -1255,26 +1255,27 @@ class _KafkaHandler is CustomTCPConnectionNotify
             part_state.leader_change = true
             part_state.leader_change_receiver = true
           end
-        elseif (part_meta.leader != _connection_broker_id) and
-          (part_state.current_leader == true) then
-          // broker will automagically pause fetch requests for this
-          // partition because leader will be set to -1
-          if not topics_to_throttle.contains(topic) then
-            topics_to_throttle(topic) = recover Set[KafkaPartitionId] end
-          end
-          try
-            topics_to_throttle(topic)?.set(partition_id)
-          else
-            _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
-              "Unable to set topics_to_throttle for topic: " + topic +
-              " and partition: " + partition_id.string() + "!"),
-            topic, partition_id))
-            return
-          end
-          handle_partition_leader_change(conn,
-            kafka_partition_error, topic, partition_id, Array[ProducerKafkaMessage val], part_state)
         else
-          part_state.current_leader = false
+          if (part_state.current_leader == true) then
+            // broker will automagically pause fetch requests for this
+            // partition because leader will be set to -1
+            if not topics_to_throttle.contains(topic) then
+              topics_to_throttle(topic) = recover Set[KafkaPartitionId] end
+            end
+            try
+              topics_to_throttle(topic)?.set(partition_id)
+            else
+              _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+                "Unable to set topics_to_throttle for topic: " + topic +
+                " and partition: " + partition_id.string() + "!"),
+              topic, partition_id))
+              return
+            end
+            handle_partition_leader_change(conn,
+              kafka_partition_error, topic, partition_id, Array[ProducerKafkaMessage val], part_state)
+          else
+            part_state.current_leader = false
+          end
         end
 
         // Due to kafka brokers processing requests sequentially there is no
