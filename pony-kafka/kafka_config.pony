@@ -758,11 +758,66 @@ class KafkaProducerMapping
 
     None
 
+// holds topic internal state relevant to the client actor
+class _KafkaClientTopicState
+  var topic_error_code: KafkaApiError
+  let topic: String
+  var is_internal: (Bool | None)
+  let partitions_state: Map[KafkaPartitionId, _KafkaClientTopicPartitionState] =
+    partitions_state.create()
+
+  new create(topic': String,
+    topic_error_code': KafkaApiError = 0, is_internal': (Bool | None) = None)
+  =>
+    topic_error_code = topic_error_code'
+    topic = topic'
+    is_internal = is_internal'
+
+  fun string(): String =>
+    var parts_str = recover ref String end
+    for p in partitions_state.values() do
+      parts_str.>append(", ").>append(p.string())
+    end
+    "KafkaClientTopicState: [ "
+      + "topic_error_code = " + topic_error_code.string()
+      + ", topic = " + topic.string()
+      + ", is_internal = " + is_internal.string()
+      + ", partitions_state = " + parts_str
+      + " ]\n"
+
+
+// Holds partition state information relevent to client actor
+class _KafkaClientTopicPartitionState
+  let partition_id: KafkaPartitionId
+  var partition_error_code: KafkaApiError
+  var leader_node_id: KafkaNodeId
+  var previous_leader_node_id: KafkaNodeId = -1
+  var producer_throttled: Bool = true
+  var consumer_paused: Bool = true
+  var current_leader: (KafkaBrokerConnection tag | None) = None
+  var previous_leader: (KafkaBrokerConnection tag | None) = None
+
+  new create(partition_error_code': KafkaApiError, partition_id': KafkaPartitionId, leader': KafkaNodeId)
+  =>
+    partition_error_code = partition_error_code'
+    partition_id = partition_id'
+    leader_node_id = leader'
+
+  fun string(): String =>
+    "KafkaClientTopicPartitionMetadata: [ "
+      + "partition_error_code = " + partition_error_code.string()
+      + ", partition_id = " + partition_id.string()
+      + ", leader_node_id = " + leader_node_id.string()
+      + ", previous_leader_node_id = " + previous_leader_node_id.string()
+      + ", producer_throttled = " + producer_throttled.string()
+      + ", consumer_paused = " + consumer_paused.string()
+      + " ]\n"
+
 // kafka client actor is responsible for creating broker connections and making
 // sure everything is set up/coordinated correctly
 actor KafkaClient
-  let _initial_broker_connections: SetIs[KafkaBrokerConnection tag] =
-    _initial_broker_connections.create()
+  let _bootstrap_broker_connections: SetIs[KafkaBrokerConnection tag] =
+    _bootstrap_broker_connections.create()
   let _conf: KafkaConfig val
   let _brokers: Map[KafkaNodeId, (_KafkaBroker val, KafkaBrokerConnection tag)] =
     _brokers.create()
@@ -774,7 +829,7 @@ actor KafkaClient
 
   let _uninitialized_brokers: Set[KafkaNodeId] = _uninitialized_brokers.create()
 
-  let _topic_leader_state: Map[String, Map[KafkaPartitionId, (KafkaNodeId, Bool, Bool)]] =
+  let _topic_leader_state: Map[String, _KafkaClientTopicState] =
     _topic_leader_state.create()
   var _topic_mapping_read_only: Map[String, Map[KafkaPartitionId, (KafkaBrokerConnection tag | None)]] val = recover val
     _topic_mapping_read_only.create() end
@@ -823,14 +878,14 @@ actor KafkaClient
       _topic_consumers(topic) = Array[KafkaConsumer tag]
     end
 
-    // create initial broker connections for discovering kafka metadata; these
+    // create bootstrap broker connections for discovering kafka metadata; these
     // get killed after reading metadata when initialization is complete
-    var initial_broker_connection_id: KafkaNodeId = -1
+    var bootstrap_broker_connection_id: KafkaNodeId = -1
     for b in _conf.brokers.values() do
       let bc = _broker_connection_factory(_auth, recover iso _KafkaHandler(this,
-        _conf, _topic_consumer_handlers_read_only, initial_broker_connection_id) end, b.host, b.port.string())
-      _initial_broker_connections.set(bc)
-      initial_broker_connection_id = initial_broker_connection_id - 1
+        _conf, _topic_consumer_handlers_read_only, bootstrap_broker_connection_id, -1) end, b.host, b.port.string())
+      _bootstrap_broker_connections.set(bc)
+      bootstrap_broker_connection_id = bootstrap_broker_connection_id - 1
     end
 
   fun ref _update_consumer_handlers_read_only() =>
@@ -921,15 +976,13 @@ actor KafkaClient
   // in general for other handlers [hash, etc] that can't just send a message
   // to a different consumer so maybe not worth implementing?)
   be consumer_pause(topic: String, partition_id: KafkaPartitionId) =>
-    var something_paused: Bool = false
+    var something_new_paused: Bool = false
 
     try
-      (let current_part_leader, let throttled, let consume_paused) =
-        _topic_leader_state(topic)?(partition_id)?
-      if consume_paused == false then
-        _topic_leader_state(topic)?(partition_id) = (current_part_leader,
-          throttled, true)
-        something_paused = true
+      let part_state = _topic_leader_state(topic)?.partitions_state(partition_id)?
+      if part_state.consumer_paused == false then
+        part_state.consumer_paused = true
+        something_new_paused = true
         _conf.logger(Fine) and _conf.logger.log(Fine,
           "Pausing consuming topic: " + topic + " and partition: " +
           partition_id.string() + ".")
@@ -941,31 +994,30 @@ actor KafkaClient
       return
     end
 
-    if something_paused then
+    if something_new_paused then
       for (_, bc) in _brokers.values() do
         bc._consumer_pause(topic, partition_id)
       end
     end
 
   be consumer_pause_all() =>
-    var something_paused: Bool = false
+    var something_new_paused: Bool = false
 
     _conf.logger(Fine) and _conf.logger.log(Fine,
       "Pausing consuming all topics.")
 
     // update topic partition/leader mapping if something changed
     for (topic, topic_leader_state) in _topic_leader_state.pairs() do
-      for (part_id, (current_part_leader, throttled, consume_paused)) in
-        topic_leader_state.pairs() do
-        if consume_paused == false then
-          topic_leader_state(part_id) = (current_part_leader, throttled, true)
-          something_paused = true
+      for (part_id, part_state) in topic_leader_state.partitions_state.pairs() do
+        if part_state.consumer_paused == false then
+          part_state.consumer_paused = true
+          something_new_paused = true
         end
       end
     end
 
 
-    if something_paused then
+    if something_new_paused then
       for (_, bc) in _brokers.values() do
         bc._consumer_pause_all()
       end
@@ -974,15 +1026,13 @@ actor KafkaClient
   // TODO: Add ability to specify offset to resume from with offset of -999 means continue from current (need to propagate to broker connections and also make sure that it doesn't get overwritten by a fetch reponse in case of an outstanding request)
   // to both this and consumer_resume_all
   be consumer_resume(topic: String, partition_id: KafkaPartitionId) =>
-    var something_resumed: Bool = false
+    var something_new_resumed: Bool = false
 
     try
-      (let current_part_leader, let throttled, let consume_paused) =
-        _topic_leader_state(topic)?(partition_id)?
-      if consume_paused == true then
-        _topic_leader_state(topic)?(partition_id) = (current_part_leader,
-          throttled, false)
-        something_resumed = true
+      let part_state = _topic_leader_state(topic)?.partitions_state(partition_id)?
+      if part_state.consumer_paused == true then
+        part_state.consumer_paused = false
+        something_new_resumed = true
         _conf.logger(Fine) and _conf.logger.log(Fine,
           "Resuming consuming topic: " + topic + " and partition: " +
           partition_id.string() + ".")
@@ -994,30 +1044,29 @@ actor KafkaClient
       return
     end
 
-    if something_resumed then
+    if something_new_resumed then
       for (_, bc) in _brokers.values() do
         bc._consumer_resume(topic, partition_id)
       end
     end
 
   be consumer_resume_all() =>
-    var something_resumed: Bool = false
+    var something_new_resumed: Bool = false
 
     _conf.logger(Fine) and _conf.logger.log(Fine,
       "Resuming consuming all topics.")
 
     // update topic partition/leader mapping if something changed
     for (topic, topic_leader_state) in _topic_leader_state.pairs() do
-      for (part_id, (current_part_leader, throttled, consume_paused)) in
-        topic_leader_state.pairs() do
-        if consume_paused == true then
-          topic_leader_state(part_id) = (current_part_leader, throttled, false)
-          something_resumed = true
+      for (part_id, part_state) in topic_leader_state.partitions_state.pairs() do
+        if part_state.consumer_paused == true then
+          part_state.consumer_paused == false
+          something_new_resumed = true
         end
       end
     end
 
-    if something_resumed then
+    if something_new_resumed then
       for (_, bc) in _brokers.values() do
         bc._consumer_resume_all()
       end
@@ -1029,13 +1078,13 @@ actor KafkaClient
 
     // send all producers their producer mappings so they can start producing
     if (not fully_initialized) and (_uninitialized_brokers.size() == 0) then
-      // dispose initial broker connections
-      for bc in _initial_broker_connections.values() do
+      // dispose bootstrap broker connections
+      for bc in _bootstrap_broker_connections.values() do
         bc.dispose()
       end
-      _initial_broker_connections.clear()
+      _bootstrap_broker_connections.clear()
 
-      // we're not fully initialized
+      // we're now fully initialized
       fully_initialized = true
 
       // check and throw errors for any missing partitions that the user specified
@@ -1051,14 +1100,14 @@ actor KafkaClient
           // TODO: expand kafkaconfig state stuff to keep track of error codes and use it to
           // only throw an error for unknown partition if no errors encountered
           // if no topic errors encountered
-//          if topic_leader_state.error_code == ErrorNone() then
+          if topic_leader_state.topic_error_code == ErrorNone() then
             // if the partition id doesn't exist it's an error
-            if not topic_leader_state.contains(part_id) then
+            if not topic_leader_state.partitions_state.contains(part_id) then
               _unrecoverable_error(KafkaErrorReport(ClientErrorPartitionFail,
                 topic, part_id))
               return
             end
-//          end
+          end
         end
       end
 
@@ -1093,7 +1142,7 @@ actor KafkaClient
 
       let topic_leader_state = try _topic_leader_state(tmeta.topic)?
         else
-          let tm = Map[KafkaPartitionId, (KafkaNodeId, Bool, Bool)]
+          let tm = _KafkaClientTopicState(tmeta.topic, tmeta.topic_error_code, tmeta.is_internal)
           _topic_leader_state(tmeta.topic) = tm
           topic_mapping_modified = true
           new_topic_partition_added = true
@@ -1117,20 +1166,30 @@ actor KafkaClient
           return
         end
 
-        (let current_part_leader, let throttled, let consume_paused) =
-          topic_leader_state.get_or_else(part_meta.partition_id, (-99, true,
-          true))
-        // New partitions/topics start out throttled. Broker connection has to
+        let part_state = topic_leader_state.partitions_state.get_or_else(part_meta.partition_id,
+          _KafkaClientTopicPartitionState(0, part_meta.partition_id, -99))
+
+        // New partitions/topics start out throttled. KafkaClientManager has to
         // explicitly unthrottle
-        if current_part_leader != part_meta.leader then
-          topic_leader_state(part_meta.partition_id) = (part_meta.leader,
-            throttled, consume_paused)
+        if part_state.leader_node_id != part_meta.leader then
+          if part_state.leader_node_id == -99 then
+            new_topic_partition_added = true
+            part_state.producer_throttled = true
+            part_state.consumer_paused = true
+          end
+          part_state.leader_node_id = part_meta.leader
           topic_mapping_modified = true
-          new_topic_partition_added = if current_part_leader == -99 then true
-            else new_topic_partition_added end
         end
       end
     end
+
+    if topic_mapping_modified then
+      _update_broker_topic_partition_assignments()
+    end
+
+    // TODO: Change this to create multiple broker connections for each KafkaNodeId if requested
+    // TODO: Add in logic to split sent/receive for each topic across two different connections
+    // for scenarios where it is desirable to ensure fetching doesn't delay producing and vice versa
 
     // create permanent broker connections to all kafka brokers
     for b in meta.brokers.values() do
@@ -1149,15 +1208,14 @@ actor KafkaClient
       else
         let bc = _broker_connection_factory(_auth, recover iso
           _KafkaHandler(this, _conf, _topic_consumer_handlers_read_only,
-          b.node_id) end, b.host, b.port.string())
+          b.node_id, 1) end, b.host, b.port.string())
         bc._update_metadata(meta)
 
         // make sure new broker connection unpauses topics/partitions that
         // aren't paused
         for (topic, topic_leader_state) in _topic_leader_state.pairs() do
-          for (part_id, (current_part_leader, throttled, consume_paused)) in
-            topic_leader_state.pairs() do
-            if consume_paused == false then
+          for (part_id, part_meta) in topic_leader_state.partitions_state.pairs() do
+            if part_meta.consumer_paused == false then
               bc._consumer_resume(topic, part_id)
             end
           end
@@ -1215,7 +1273,7 @@ actor KafkaClient
           try
             let map_topic_parts: Set[KafkaPartitionId] iso = recover map_topic_parts.create()
                end
-            for partition_id in topic_leader_state.keys() do
+            for partition_id in topic_leader_state.partitions_state.keys() do
               map_topic_parts.set(partition_id)
             end
             let ktt: KafkaTopicType =
@@ -1250,6 +1308,10 @@ actor KafkaClient
       end
     end
 
+  fun ref _update_broker_topic_partition_assignments() =>
+    // TODO: update broker connection to topic/partition assignment
+    None
+
   fun ref update_read_only_topic_mapping() =>
     let map_topic_mapping: Map[String, Map[KafkaPartitionId, (KafkaBrokerConnection tag | None)]] iso = recover iso
       map_topic_mapping.create() end
@@ -1267,12 +1329,11 @@ actor KafkaClient
           map_topic_part_mapping.create() end
         let set_topic_partitions_throttled: Set[KafkaPartitionId] iso = recover
           set_topic_partitions_throttled.create() end
-        for (partition_id, (leader_id, throttled, consume_paused)) in
-          topic_leader_state.pairs() do
+        for (partition_id, part_state) in topic_leader_state.partitions_state.pairs() do
           // only include partitions if they were in the provided list or if no topics were provided
           if (_conf.topics(topic)?.partitions.contains(partition_id)) or (_conf.topics(topic)?.partitions.size() == 0) then
-            map_topic_part_mapping(partition_id) = if throttled then None else _brokers(leader_id)?._2 end
-            if throttled then
+            map_topic_part_mapping(partition_id) = if part_state.producer_throttled then None else _brokers(part_state.leader_node_id)?._2 end
+            if part_state.producer_throttled then
               set_topic_partitions_throttled.set(partition_id)
             end
           end
@@ -1337,12 +1398,11 @@ actor KafkaClient
 
     // mark all partitions for the broker as throttled
     for (topic, map_leader_state) in _topic_leader_state.pairs() do
-      for (partition_id, (leader_id, throttled, consume_paused)) in
-        map_leader_state.pairs() do
-        if leader_id == broker_id then
+      for (partition_id, part_state) in map_leader_state.partitions_state.pairs() do
+        if part_state.leader_node_id == broker_id then
           _conf.logger(Fine) and _conf.logger.log(Fine, "Throttling producers for " +
             " topic: " + topic + ", paritition: " + partition_id.string())
-          map_leader_state(partition_id) = (leader_id, true, consume_paused)
+          part_state.producer_throttled = true
         end
       end
     end
@@ -1369,12 +1429,11 @@ actor KafkaClient
   be _unthrottle_producers(broker_id: KafkaNodeId) =>
     // mark all partitions for the broker as unthrottled
     for (topic, map_leader_state) in _topic_leader_state.pairs() do
-      for (partition_id, (leader_id, throttled, consume_paused)) in
-        map_leader_state.pairs() do
-        if leader_id == broker_id then
+      for (partition_id, part_state) in map_leader_state.partitions_state.pairs() do
+        if part_state.leader_node_id == broker_id then
+          part_state.producer_throttled = false
           _conf.logger(Fine) and _conf.logger.log(Fine, "Unthrottling producers for " +
             " topic: " + topic + ", paritition: " + partition_id.string())
-          map_leader_state(partition_id) = (leader_id, false, consume_paused)
         end
       end
     end
@@ -1401,10 +1460,8 @@ actor KafkaClient
         for partition_id in partitions.values() do
           _conf.logger(Fine) and _conf.logger.log(Fine, "Throttling producers for " +
             " topic: " + topic + ", paritition: " + partition_id.string())
-          (let leader_id, let throttled, let consume_paused) =
-            topic_leader_state_current(partition_id)?
-          topic_leader_state_current(partition_id) = (leader_id, true,
-            consume_paused)
+          let part_state = topic_leader_state_current.partitions_state(partition_id)?
+          part_state.producer_throttled = true
         end
       else
         _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Leader change " +
@@ -1473,14 +1530,13 @@ actor KafkaClient
   =>
     // mark topic/partitions requested as unthrottled
     for (topic, map_leader_state) in _topic_leader_state.pairs() do
-      for (partition_id, (leader_id, throttled, consume_paused)) in
-        map_leader_state.pairs() do
+      for (partition_id, part_state) in map_leader_state.partitions_state.pairs() do
         try
           if topics_to_unthrottle.contains(topic) and
             topics_to_unthrottle(topic)?.contains(partition_id) then
+            part_state.producer_throttled = false
             _conf.logger(Fine) and _conf.logger.log(Fine, "Unthrottling producers for " +
               " topic: " + topic + ", paritition: " + partition_id.string())
-            map_leader_state(partition_id) = (leader_id, false, consume_paused)
           end
         else
           _unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen("Leader change " +
@@ -1545,12 +1601,12 @@ actor KafkaClient
 
       match error_report.status
       | let e: ClientErrorNoBrokerConnection =>
-        if _initial_broker_connections.contains(e.broker_tag) then
-          // remove initial broker connection from initial broker connections set
-          _initial_broker_connections.unset(e.broker_tag)
+        if _bootstrap_broker_connections.contains(e.broker_tag) then
+          // remove bootstrap broker connection from bootstrap broker connections set
+          _bootstrap_broker_connections.unset(e.broker_tag)
           e.broker_tag.dispose()
           // if set is now empty, we can give up and shut down client
-          if _initial_broker_connections.size() == 0 then
+          if _bootstrap_broker_connections.size() == 0 then
             _unrecoverable_error(KafkaErrorReport(ClientErrorNoConnection,
               "N/A", -1))
           end
@@ -1589,10 +1645,10 @@ actor KafkaClient
   // TODO: Make sure dispose is being done properly and client will throw
   // errors or something if it gets future messages after dispose
   be dispose() =>
-    for bc in _initial_broker_connections.values() do
+    for bc in _bootstrap_broker_connections.values() do
       bc.dispose()
     end
-    _initial_broker_connections.clear()
+    _bootstrap_broker_connections.clear()
 
     for (_, bc) in _brokers.values() do
       bc.dispose()

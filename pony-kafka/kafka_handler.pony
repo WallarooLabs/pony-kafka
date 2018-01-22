@@ -115,7 +115,6 @@ class _KafkaTopicPartitionState
   var replicas: Array[KafkaNodeId] val
   var isrs: Array[KafkaNodeId] val
   var request_timestamp: KafkaTimestamp
-  var error_code: KafkaApiError = 0
   var timestamp: (KafkaTimestamp | None) = None
   var request_offset: KafkaOffset = -1
   var max_bytes: I32
@@ -178,6 +177,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
   var _brokers: Map[KafkaNodeId, (_KafkaBroker val, KafkaBrokerConnection tag)] val =
     recover val _brokers.create() end
   let _connection_broker_id: KafkaNodeId
+  let _connection_number: I32
 
   let _conf: KafkaConfig val
   let _metadata_only: Bool
@@ -204,19 +204,20 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
   new create(client: KafkaClient, conf: KafkaConfig val,
     topic_consumer_handlers: Map[String, KafkaConsumerMessageHandler val] val,
-    connection_broker_id: KafkaNodeId = -1, reconnect_closed_delay: U64 = 100_000_000,
+    connection_broker_id: KafkaNodeId = -1, connection_number: I32 = -1, reconnect_closed_delay: U64 = 100_000_000,
     reconnect_failed_delay: U64 = 1_000_000_000, num_reconnects: U8 = 250)
   =>
     _conf = conf
     _kafka_client = client
     _connection_broker_id = connection_broker_id
+    _connection_number = connection_number
     _metadata_only = (connection_broker_id < 0)
     _reconnect_closed_delay = reconnect_closed_delay
     _reconnect_failed_delay = reconnect_failed_delay
     _num_reconnects_total = num_reconnects
     _num_reconnects_left = num_reconnects.i16()
 
-    _name = _conf.client_name + "#" + _connection_broker_id.string() + ": "
+    _name = _conf.client_name + "#" + _connection_broker_id.string() + "." + _connection_number.string() + ": "
 
     // initialize pending buffer
     _pending_buffer.push((0, 0, Map[String, Map[KafkaPartitionId, Array[ProducerKafkaMessage
@@ -1272,6 +1273,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
         part_state.isrs = part_meta.isrs
         part_state.request_timestamp = part_meta.request_timestamp
 
+
+        // TODO: Replace this with waiting for assignment by kafkaclient due to multiple tcp actors
+        // for a single kafka broker
         if part_meta.leader == _connection_broker_id then
           if current_partition_new or (old_leader == part_meta.leader) then
             part_state.current_leader = true
@@ -1377,6 +1381,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
             // The leader did actually end up changing to a different broker
             _conf.logger(Warn) and _conf.logger.log(Warn, _name +
               "Leader did actually change for topic: " + topic + ", partition: " + partition_id.string() + ". The new leader is: " + part_state.leader.string())
+
+            // TODO: wait until kafkaclient actor tells us the new leader before doing anything due to multiple tcp actors
+            // for a single kafka broker
 
             // Make sure we don't think we're still changing leaders any
             // longer
@@ -1577,7 +1584,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
         try
           _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
-            .error_code = part.error_code
+            .partition_error_code = part.error_code
           if _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
             .request_offset == -1 then
             _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
