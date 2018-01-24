@@ -160,6 +160,7 @@ class IsoReader is Reader
       error
     end
 
+    // TODO: rewrite to avoid allocation of out array if all data if in first chunk
     _available = _available - len
     var out = recover Array[Array[U8] iso] end
     var i = USize(0)
@@ -172,8 +173,11 @@ class IsoReader is Reader
 
       (let next_segment, data) = (consume data).chop(need)
 
-      if avail > need then
-        _chunks.unshift(consume data)
+      if avail >= need then
+        if data.size() > 0 then
+          _chunks.unshift(consume data)
+        end
+
         if out.size() == 0 then
           return (copy_len, consume next_segment)
         else

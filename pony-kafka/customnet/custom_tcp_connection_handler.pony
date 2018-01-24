@@ -537,22 +537,23 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
             _pending_writev.cpointer(), num_to_send) ?
 
           if len < bytes_to_send then
+            var num_sent: USize = 0
             while len > 0 do
-              let iov_p = _pending_writev(0)?
-              let iov_s = _pending_writev(1)?
+              let iov_p = _pending_writev((num_sent*2)+0)?
+              let iov_s = _pending_writev((num_sent*2)+1)?
               if iov_s <= len then
                 len = len - iov_s
-                _pending_writev.shift()?
-                _pending_writev.shift()?
+                num_sent = num_sent + 1
                 _pending.shift()?
                 _pending_writev_total = _pending_writev_total - iov_s
               else
-                _pending_writev.update(0, iov_p+len)?
-                _pending_writev.update(1, iov_s-len)?
+                _pending_writev.update((num_sent*2)+0, iov_p+len)?
+                _pending_writev.update((num_sent*2)+1, iov_s-len)?
                 _pending_writev_total = _pending_writev_total - len
                 len = 0
               end
             end
+            _pending_writev.trim_in_place((num_sent*2))
             _apply_backpressure()
           else
             // sent all data we requested in this batch
@@ -562,9 +563,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
               _pending.clear()
               return true
             else
+              _pending_writev.trim_in_place((num_to_send*2))
               for d in Range[USize](0, num_to_send, 1) do
-                _pending_writev.shift()?
-                _pending_writev.shift()?
                 _pending.shift()?
               end
             end

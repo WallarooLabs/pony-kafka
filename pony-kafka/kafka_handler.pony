@@ -365,6 +365,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
     _conf.logger(Info) and _conf.logger.log(Info, _name +
       "Done with reconnect and metadata update")
 
+    // unthrottled producers
+    unthrottled(conn)
+
     metadata_refresh_request_outstanding = false
     match metadata_refresh_timer
     | None =>
@@ -609,8 +612,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
       "Kafka client failed authentication")
 
   fun ref closed(conn: CustomTCPConnection ref) =>
-    _conf.logger(Info) and _conf.logger.log(Info, _name +
-      "Kafka client closed connection")
+    (let host, let service) = conn.get_handler().requested_address()
+    _conf.logger(Warn) and _conf.logger.log(Warn, _name +
+      "Connection to Kafka broker at " + host + ":" + service + " closed")
 
     // clean up pending requests since they're invalid now and need to be
     // retried (for produce requests only)
@@ -618,6 +622,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
       // TODO: double check logic on order this needs to be done in
       (let sent_correlation_id, let request_type, let extra_request_data) =
         try
+          // TODO: See if this can be replaced with something cheaper
           _requests_buffer.pop()?
         else
           _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
@@ -712,7 +717,16 @@ class _KafkaHandler is CustomTCPConnectionNotify
     _conf.logger(Info) and _conf.logger.log(Info, _name +
       "Kafka client is unthrottled")
     _currently_throttled = false
-    _kafka_client._unthrottle_producers(_connection_broker_id)
+
+    // send pending data
+    try
+      _maybe_process_pending_buffer(conn as KafkaBrokerConnection)
+    end
+
+    // unthrottled producers if we didn't end up getting throttled again while processing the pending buffer
+    if not _currently_throttled then
+      _kafka_client._unthrottle_producers(_connection_broker_id)
+    end
 
   fun dispose() =>
     _conf.logger(Info) and _conf.logger.log(Info, _name +
@@ -890,6 +904,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
     _maybe_process_pending_buffer(conn)
 
   fun ref _maybe_process_pending_buffer(conn: KafkaBrokerConnection ref) =>
+    if _currently_throttled then
+      return
+    end
     (_, let num_msgs, _) = try _pending_buffer(0)? else return end
     if num_msgs == 0 then
       return
@@ -907,10 +924,12 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
         // cancel and recreate timer for remaining messages to be sent
         _timers.cancel(t)
-        let timer = Timer(_KafkaSendPendingMessagesTimerNotify(conn),
-          _conf.max_produce_buffer_time)
-        send_batch_timer = timer
-        _timers(consume timer)
+        if not _currently_throttled then
+          let timer = Timer(_KafkaSendPendingMessagesTimerNotify(conn),
+            _conf.max_produce_buffer_time)
+          send_batch_timer = timer
+          _timers(consume timer)
+        end
       else
         // check if we've reached max_produce_buffer_messages or not
         if num_msgs >= _conf.max_produce_buffer_messages then
@@ -944,6 +963,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
   fun ref process_pending_buffer(conn: KafkaBrokerConnection ref,
     send_all_but_one: Bool = false)
   =>
+    if _currently_throttled then
+      return
+    end
     (_, let n, _) = try _pending_buffer(0)? else return end
     if n == 0 then
       return
@@ -952,6 +974,10 @@ class _KafkaHandler is CustomTCPConnectionNotify
     let limit: USize = if send_all_but_one then 1 else 0 end
     while (_requests_buffer.size() < _conf.max_inflight_requests) and
       (_pending_buffer.size() > limit) do
+      if _currently_throttled then
+        return
+      end
+
       // TODO: Figure out a way to avoid shift... maybe use a ring buffer?
       (let size, let num_msgs, let msgs) = try _pending_buffer.shift()?
           else
@@ -1665,6 +1691,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
               topic, part, part_response.offset + i.i64(),
               part_response.timestamp, m.get_opaque()))
           end
+        | ErrorInvalidRequiredAcks =>
+          _kafka_client._unrecoverable_error(KafkaErrorReport(kafka_error, topic, part))
+          return
         | ErrorLeaderNotAvailable | ErrorNotLeaderForPartition |
             ErrorUnknownTopicOrPartition
           =>
@@ -1951,7 +1980,7 @@ class _KafkaHandler is CustomTCPConnectionNotify
     network_received_timestamp: U64)
   =>
     (let sent_correlation_id, let request_type, let extra_request_data) =
-      try _requests_buffer.shift()?
+      try _requests_buffer(0)?
       else
         _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
           "Error we received a response to our requests_buffer is empty"
@@ -1959,6 +1988,12 @@ class _KafkaHandler is CustomTCPConnectionNotify
           "N/A", -1))
         return
       end
+
+    if _requests_buffer.size() == 1 then
+      _requests_buffer.clear()
+    else
+      _requests_buffer.trim_in_place(1)
+    end
 
     _rb.append(consume data)
 

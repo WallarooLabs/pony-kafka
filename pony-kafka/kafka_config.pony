@@ -98,7 +98,9 @@ trait KafkaProducer
       kafka_producer_ready(client)
     end
 
-    _kafka_producer_throttled(client, topic_partitions_throttled)
+    if topic_partitions_throttled.size() > 0 then
+      _kafka_producer_throttled(client, topic_partitions_throttled)
+    end
 
   be _update_brokers_and_topic_mapping(client: KafkaClient, brokers: Array[KafkaBrokerConnection tag] val,
     topic_mapping: Map[String, Map[KafkaPartitionId, (KafkaBrokerConnection tag | None)]]
@@ -110,7 +112,9 @@ trait KafkaProducer
       pm'.update_brokers_and_topic_mapping(client, brokers, topic_mapping)
     end
 
-    _kafka_producer_throttled(client, topic_partitions_throttled)
+    if topic_partitions_throttled.size() > 0 then
+      _kafka_producer_throttled(client, topic_partitions_throttled)
+    end
 
   be kafka_producer_ready(client: KafkaClient)
 
@@ -120,6 +124,10 @@ trait KafkaProducer
     topic_partitions_throttled: Map[String, Set[KafkaPartitionId]] val,
     ack_requested: Bool, p: KafkaProducer tag)
   =>
+    if topic_partitions_throttled.size() == 0 then
+      return
+    end
+
     let pm = producer_mapping(client)
     match pm
     | let pm': KafkaProducerMapping => pm'.update_topic_mapping(client, topic_mapping)
@@ -1060,6 +1068,9 @@ actor KafkaClient
 
   // update metadata based on what broker connections got from kafka
   be _update_metadata(meta: _KafkaMetadata val) =>
+    _conf.logger(Fine) and _conf.logger.log(Fine,
+      "Kakfa Client updating metadata...")
+
     var brokers_modified: Bool = false
     var topic_mapping_modified: Bool = false
     var new_topic_partition_added: Bool = false
@@ -1184,15 +1195,15 @@ actor KafkaClient
       _brokers_read_only = consume brokers_array
     end
 
+    // tell all broker connections to update their state so everyone is in
+    // sync
+    for (_, bc) in _brokers.values() do
+      bc._update_metadata(meta)
+    end
+
     // if topic mapping changed, tell all producers and send all brokers latest
     // metadata
     if topic_mapping_modified then
-      // tell all broker connections to update their state so everyone is in
-      // sync
-      for (_, bc) in _brokers.values() do
-        bc._update_metadata(meta)
-      end
-
       update_read_only_topic_mapping()
 
       // let kafka client manager know latest topic/partitions list
@@ -1230,10 +1241,12 @@ actor KafkaClient
         _manager.receive_kafka_topics_partitions(this, _topic_partitions_read_only)
       end
 
-      // update producers with new info
-      for p in _producers.values() do
-        p._update_brokers_and_topic_mapping(this, _brokers_read_only,
-          _topic_mapping_read_only, _topic_partitions_throttled_read_only)
+      if fully_initialized then
+        // update producers with new info
+        for p in _producers.values() do
+          p._update_brokers_and_topic_mapping(this, _brokers_read_only,
+            _topic_mapping_read_only, _topic_partitions_throttled_read_only)
+        end
       end
     end
 
@@ -1319,7 +1332,9 @@ actor KafkaClient
 
   // throttling without leader change (no ack confirmation from producers)
   be _throttle_producers(broker_id: KafkaNodeId) =>
-    var fully_unthrottled: Bool = true
+    _conf.logger(Fine) and _conf.logger.log(Fine, "Throttling producers for " +
+      " broker_id: " + broker_id.string())
+
     // mark all partitions for the broker as throttled
     for (topic, map_leader_state) in _topic_leader_state.pairs() do
       for (partition_id, (leader_id, throttled, consume_paused)) in
@@ -1328,9 +1343,6 @@ actor KafkaClient
           _conf.logger(Fine) and _conf.logger.log(Fine, "Throttling producers for " +
             " topic: " + topic + ", paritition: " + partition_id.string())
           map_leader_state(partition_id) = (leader_id, true, consume_paused)
-          fully_unthrottled = false
-        elseif throttled == true then
-          fully_unthrottled = false
         end
       end
     end
@@ -1338,7 +1350,7 @@ actor KafkaClient
     update_read_only_topic_mapping()
 
     // if fully unthrottled because broker_id doesn't own any partitions then don't send updated mapping to producers
-    if fully_unthrottled then
+    if _topic_partitions_throttled_read_only.size() == 0 then
       return
     end
 
@@ -1404,6 +1416,11 @@ actor KafkaClient
     end
 
     update_read_only_topic_mapping()
+
+    // if fully unthrottled because broker_id doesn't own any partitions then don't send updated mapping to producers
+    if _topic_partitions_throttled_read_only.size() == 0 then
+      return
+    end
 
     // if not full initialized then don't update mapping to send to producers
     if not fully_initialized then

@@ -69,7 +69,6 @@ class iso _TestIsoReader is UnitTest
     b.append(recover [as U8: '\n'; 't'; 'h'; 'e'] end)
     b.append(recover [as U8: 'r'; 'e'; '\r'; '\n'] end)
 
-
     // These expectations consume bytes from the head of the buffer.
     h.assert_eq[U8](LittleEndianDecoder.u8(b)?, 0x42)
     h.assert_eq[U16](BigEndianDecoder.u16(b)?, 0xDEAD)
