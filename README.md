@@ -10,7 +10,7 @@ The main reason this exists is because the alternatives weren't necessarily goin
 
 # Building
 
-You need [ponyc](https://github.com/ponylang/ponyc) to compile `pony-kafka`. This is currently tested with `ponyc` version 0.19.2.
+You need [ponyc](https://github.com/ponylang/ponyc) to compile `pony-kafka`. This is currently tested with `ponyc` version 0.21.3.
 
 You also need the following (in addition to what is needed for Pony itself):
 
@@ -41,11 +41,21 @@ For OSX you can run:
 brew install snappy lz4
 ```
 
+You can then build the pony-kafka tests by running:
+
+```bash
+ponyc pony-kafka
+```
+
+or the example performance application by running:
+
+```bash
+ponyc examples/performance
+```
+
 # Current status
 
 This is currently alpha quality software that still needs more work before it is production ready.
-
-You currently need the latest Wallaroo Labs version of Pony (https://github.com/WallarooLabs/ponyc). Mainline Pony compatibility is already planned for the near future.
 
 A quick summary of features:
 
@@ -58,9 +68,14 @@ Leader Failover | Ability to correctly recover from/react to kafka leader failov
 Compression | Ability to use LZ4/Snappy/Zlib compression for message sets | Implemented
 Message Format V2 | Ability to use message set format version 2 | Not Implemented
 Idempotence/Transaction | Ability to use idempotence/transactions | Not Implemented
+Metrics | Ability to collect metrics and provide reports of metrics periodically | Not Implemented
+Security | Ability to use SSL/SASL/etc to secure connection to Kafka brokers | Not Implemented
+Message Interceptors | Ability to intercept messages before produce and after consume to be able to modify them or extract metadata from them for monitoring and other purposes | Not Implemented
 Producer Batching | Ability to batch produce requests for efficiency | Implemented
 Producer Rate Limiting | Ability to limit number of outstanding produce requests | Implemented
 Throttling | Ability to tell producers of data to slow down due to network congestion | Implemented
 Message Delivery Reports | Report back to producers once Kafka has confirm message has been successfully stored | Implemented
 Logging | Logging of what is happening/errors | Partially Implemented
 Error Handling | Ability to gracefully handle errors (retry if possible; fail fast if not) | Partially Implemented
+Documentation | Comprehensive documentation for developers using Pony Kafka and developers enhancing Pony Kafka | Not Implemented
+Testing | Comprehensive test suite to confirm everything is working as expected | Not Implemented
