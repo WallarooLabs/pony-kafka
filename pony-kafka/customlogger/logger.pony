@@ -167,7 +167,7 @@ class val Logger[A]
     level() >= _level()
 
   fun log(level: LogLevel, value: A,
-    date: String = Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S"),
+    date: String = PosixDate(Time.seconds()).format("%Y-%m-%d %H:%M:%S"),
     loc: SourceLoc = __loc): Bool
   =>
     _out.print(_formatter(level, _f(consume value), _verbose, date, loc))
