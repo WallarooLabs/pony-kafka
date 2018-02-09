@@ -210,21 +210,19 @@ class KafkaProducerRandomPartitioner is KafkaProducerMessageHandler
 class KafkaProducerHashPartitioner is KafkaProducerMessageHandler
   new create() => None
 
-  fun ref apply(key: (ByteSeq | Array[ByteSeq] val), key_size: USize,
+  fun ref apply(key: (None | ByteSeq | Array[ByteSeq] val), key_size: USize,
     num_partitions: I32): KafkaPartitionId
   =>
     // TODO: replace Crc32 with Murmur2 to be compatible with default partitions
     // for java client?
     // Crc32 should be compatible with C client
     match key
+    | None => 0 // always return partition 0 if None
     | let a: Array[U8] val => (Crc32.crc32(a) % num_partitions.usize()).i32()
     | let s: String =>
       let a = s.array(); (Crc32.crc32(a) % num_partitions.usize()).i32()
     | let arr: Array[ByteSeq] val => Crc32.crc32_array(arr).i32()
     end
-
-  fun ref apply(key: None, key_size: USize, num_partitions: I32): KafkaPartitionId =>
-    0 // always return partition 0 if None
 
   fun clone(): KafkaProducerMessageHandler iso^ =>
     recover iso KafkaProducerHashPartitioner end
@@ -237,17 +235,14 @@ class KafkaProducerHashRoundRobinPartitioner is KafkaProducerMessageHandler
 
   new create() => None
 
-  fun ref apply(key: (ByteSeq | Array[ByteSeq] val), key_size: USize,
+  fun ref apply(key: (None | ByteSeq | Array[ByteSeq] val), key_size: USize,
     num_partitions: I32): KafkaPartitionId
   =>
-    if key_size > 0 then
+    if (key_size > 0) and (key isnt None) then
       hash_partitioner(key, key_size, num_partitions)
     else
       rr_partitioner(key, key_size, num_partitions)
     end
-
-  fun ref apply(key: None, key_size: USize, num_partitions: I32): KafkaPartitionId =>
-    rr_partitioner(key, key_size, num_partitions)
 
   fun clone(): KafkaProducerMessageHandler iso^ =>
     recover iso KafkaProducerHashRoundRobinPartitioner end

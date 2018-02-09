@@ -488,7 +488,7 @@ primitive KafkaLZ4Compression
 
     var hc = data(offset)?
 
-    var bad_hc: U8 = (((XXHash.hash32(data, 0, 0, offset)? as U32) >> 8) and
+    var bad_hc: U8 = ((XXHash.hash32(data, 0, 0, offset)? >> 8) and
       0xff).u8()
 
     if hc != bad_hc then
@@ -533,7 +533,7 @@ primitive KafkaLZ4Compression
     var good_hc: U8 = 0
     let data' = recover
        let d = consume ref data
-       good_hc = (((XXHash.hash32(d, 0, 4, offset - 4)? as U32) >> 8) and
+       good_hc = ((XXHash.hash32(d, 0, 4, offset - 4)? >> 8) and
        0xff).u8()
        consume d
      end
@@ -1076,24 +1076,16 @@ primitive _KafkaMessageSetCodecV0V1
 
 // primitves for basic kafka protocol types (array, string, integer types, etc)
 primitive _KafkaByteArrayCodec
-  fun encode(wb: Writer ref, bytes: ByteSeq, num_bytes: USize) =>
-    if num_bytes > 0 then
+  fun encode(wb: Writer ref, bytes: (None | ByteSeq | Array[ByteSeq] val), num_bytes: USize) =>
+    if (num_bytes > 0) and (bytes isnt None) then
       _KafkaI32Codec.encode(wb, num_bytes.i32())
-      wb.write(bytes)
+      match bytes
+      | let b: ByteSeq => wb.write(b)
+      | let b: Array[ByteSeq] val => wb.writev(b)
+      end
     else
       _KafkaI32Codec.encode(wb, -1)
     end
-
-  fun encode(wb: Writer ref, bytes: Array[ByteSeq] val, num_bytes: USize) =>
-    if num_bytes > 0 then
-      _KafkaI32Codec.encode(wb, num_bytes.i32())
-      wb.writev(bytes)
-    else
-      _KafkaI32Codec.encode(wb, -1)
-    end
-
-  fun encode(wb: Writer ref, bytes: None, num_bytes: USize) =>
-    _KafkaI32Codec.encode(wb, -1)
 
   fun decode_default_none(logger: Logger[String], rb: IsoReader ref,
     err_str: String = "Error decoding byte array buffer"):

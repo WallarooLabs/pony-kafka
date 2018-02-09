@@ -37,14 +37,14 @@ class iso _TestXXHash is UnitTest
   fun apply(h: TestHelper) ? =>
     let d = [as U8: 1; 2; 6; 10; 42; 'H'; 'e'; 'l'; 'l'; 'o'; ','; ' '; 'w'
       'o'; 'r'; 'l'; 'd'; '!'; 0; 2; 56; 99]
-    h.assert_eq[U32](0x02cc5d05, XXHash.hash32(Array[U8], 0)? as U32)
-    h.assert_eq[U32](0xe0fe705f, XXHash.hash32([as U8: 42], 0)? as U32)
+    h.assert_eq[U32](0x02cc5d05, XXHash.hash32(Array[U8], 0)?)
+    h.assert_eq[U32](0xe0fe705f, XXHash.hash32([as U8: 42], 0)?)
     h.assert_eq[U32](0x9e5e7e93, XXHash.hash32([as U8: 'H'; 'e'; 'l'; 'l'; 'o'
-      ','; ' '; 'w'; 'o'; 'r'; 'l'; 'd'; '!'; 0], 0)? as U32)
-    h.assert_eq[U32](0xd6bf8459, XXHash.hash32(Array[U8], 0x42c91977)? as U32)
-    h.assert_eq[U32](0x02cc5d05, XXHash.hash32(d, 0, 4, 0)? as U32)
-    h.assert_eq[U32](0xe0fe705f, XXHash.hash32(d, 0, 4, 1)? as U32)
-    h.assert_eq[U32](0x9e5e7e93, XXHash.hash32(d, 0, 5, 14)? as U32)
+      ','; ' '; 'w'; 'o'; 'r'; 'l'; 'd'; '!'; 0], 0)?)
+    h.assert_eq[U32](0xd6bf8459, XXHash.hash32(Array[U8], 0x42c91977)?)
+    h.assert_eq[U32](0x02cc5d05, XXHash.hash32(d, 0, 4, 0)?)
+    h.assert_eq[U32](0xe0fe705f, XXHash.hash32(d, 0, 4, 1)?)
+    h.assert_eq[U32](0x9e5e7e93, XXHash.hash32(d, 0, 5, 14)?)
 
 class iso _TestZlib is UnitTest
   """
