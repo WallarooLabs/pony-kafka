@@ -20,12 +20,15 @@ primitive XXHash
   // TODO: hash64
   // TODO: should null terminator for strings be included? to match behavior of
   // C string hashing?
-  fun hash32(buffer: String, seed: U32, buffer_offset: USize, num_bytes: USize):
+  fun hash32(buffer: (String | Array[U8] box), seed: U32, buffer_offset: USize = 0, num_bytes: USize = -1):
     U32 ?
   =>
-    hash32(buffer.array(), seed, buffer_offset, num_bytes)?
+    match buffer
+    | let b: String => _hash32(b.array(), seed, buffer_offset, num_bytes)?
+    | let b: Array[U8] box => _hash32(b, seed, buffer_offset, num_bytes)?
+    end
 
-  fun hash32(buffer: Array[U8] box, seed: U32 = 0, buffer_offset: USize = 0,
+  fun _hash32(buffer: Array[U8] box, seed: U32 = 0, buffer_offset: USize = 0,
     num_bytes: USize = -1): U32 ?
   =>
     var h32: U32 = 0

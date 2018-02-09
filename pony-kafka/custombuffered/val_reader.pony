@@ -108,7 +108,7 @@ class ValReader is PeekableReader
     _chunks.clear()
     _available = 0
 
-  fun ref append(data: ByteSeq) =>
+  fun ref _append(data: ByteSeq) =>
     """
     Add a chunk of data.
     """
@@ -121,14 +121,18 @@ class ValReader is PeekableReader
     _available = _available + data_array.size()
     _chunks.push((data_array, 0))
 
-  fun ref append(data: Array[ByteSeq] val) =>
+  fun ref append(data: (ByteSeq | Array[ByteSeq] val)) =>
     """
     Add a chunk of data.
     """
-    for d in data.values() do
-      match d
-      | let s: String => append(s.array())
-      | let a: Array[U8] val => append(a)
+    match data
+    | let data': ByteSeq => _append(data')
+    | let data': Array[ByteSeq] val =>
+      for d in data'.values() do
+        match d
+        | let s: String => append(s.array())
+        | let a: Array[U8] val => append(a)
+        end
       end
     end
 
