@@ -771,14 +771,19 @@ primitive _KafkaMessageSetCodecV0V1
             -1, KafkaTimestampNotAvailable, topic_partition) end)])
         end
 
-      if (msg_size.usize() - 4) > rb.size() then
+      if msg_size.usize() > rb.size() then
         logger(Fine) and logger.log(Fine,
           "Received partial message. Reader doesn't have Message size of: " +
-          (msg_size.usize() - 4).string() + " data in it. it has " +
+          msg_size.usize().string() + " data in it. it has " +
           rb.size().string() + " left.")
 
         // skip remaining data
-        try rb.skip(rb.size())? end
+        try
+          rb.skip(rb.size())?
+        else
+          logger(Error) and logger.log(Error,
+            "Error skipping partial message data!")
+        end
 
         // # messages == 0 and partial message encountered; increase max bytes
         // automagically as a temporary thing to ensure progress can be made
@@ -802,9 +807,23 @@ primitive _KafkaMessageSetCodecV0V1
         try
           rb.read_contiguous_bytes(msg_size.usize() - 4)?
         else
-          return (offset, [(recover Array[U8] end, ClientErrorDecode("error decoding remaining message bytes"), recover KafkaMessageMetadata._create(
-            broker_conn, offset, crc, -1, true, -1, -1,
-            -1, KafkaTimestampNotAvailable, topic_partition) end)])
+          logger(Error) and logger.log(Error,
+            "error decoding remaining message bytes of size: " + (msg_size.usize() - 4).string() + "from read buffer of size: " + rb.size().string() + ". topic: " + topic_partition.topic
+            + ", partition: " + topic_partition.partition_id.string()
+            + ", offset: " + offset.string() + ".")
+
+          try
+            rb.block(msg_size.usize() - 4)?
+          else
+            logger(Error) and logger.log(Error,
+              "error decoding remaining message bytes. topic: " + topic_partition.topic
+              + ", partition: " + topic_partition.partition_id.string()
+              + ", offset: " + offset.string() + ".")
+
+            return (offset, [(recover Array[U8] end, ClientErrorDecode("error decoding remaining message bytes"), recover KafkaMessageMetadata._create(
+              broker_conn, offset, crc, -1, true, -1, -1,
+              -1, KafkaTimestampNotAvailable, topic_partition) end)])
+          end
         end
 
       (let ls, let msgs) = decode_message(broker_conn, logger, topic_partition,
