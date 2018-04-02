@@ -129,7 +129,7 @@ class KafkaConfigCLIParser
              | F64Argument => "(Float)"
              else "" end
 
-      _out.print("--" + long + short_str + "       " + arg_type_str + "    "
+      _out.print("  --" + long + short_str + "       " + arg_type_str + "    "
         + help)
     end
 
