@@ -90,13 +90,13 @@ class KafkaConfigCLIParser
         Required, "(Consumer) Maximum # of bytes to request for a single topic/partition at a time (1048576)"))
       opts_array.push((_pre + "offset_default", None, StringArgument, Required,
       "Set the Consumer offset default to be used when not overridden. "
-        + "Valid consumer offset values are positive integers (absolute offset), negative integers (relative from END offset at time of offsets refresh), END, START. (START)"))
+        + "Valid consumer offset values are positive integers (absolute offset), negative integers (relative from END offset at time of offsets refresh), END, START. 0 is not allowed. (START)"))
 
     end
 
     opts_array.push((_pre + "partitions", None, StringArgument, Required,
-      "Comma and colon separated list of partitions:offset pairs. Consumer offset can be left off and the default will be used."
-        + "Valid consumer offset values are positive integers (absolute offset), negative integers (relative from END offset at time of offsets refresh), END, START). Example arguments: '0,2,4' or '1:5,3:-5,5,7:END,9:START'. Defaults to all partitions if partition list provided any other partitions in kafka will be ignore and any partitions specified that don't exist in kafka will be treated as an error"))
+      "Comma and colon separated list of partitions:offset pairs. Consumer offset can be left off or set to 0 and the default will be used. "
+        + "Valid consumer offset values are positive integers (absolute offset), negative integers (relative from END offset at time of offsets refresh), END, START. Example arguments: '0,2,4' or '1:5,3:-5,5,7:END,9:START'. Defaults to all partitions if partition list provided any other partitions in kafka will be ignore and any partitions specified that don't exist in kafka will be treated as an error"))
 
     // Producer specific options
     if (_client_mode is KafkaProduceAndConsume) or
@@ -377,7 +377,13 @@ primitive KafkaConfigFactory
           // if no default, throw an error
           error
         end
-      | let s: String => s.i64()?
+      | let s: String
+      => let o = s.i64()?
+         if o == 0 then
+           _parse_offset("", offset_default)?
+         else
+           o
+         end
       end
 
   fun _parse_partitions(partitions: String, offset_default: ConsumerRequestOffset): Array[(KafkaPartitionId, ConsumerRequestOffset)] val ? =>

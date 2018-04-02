@@ -51,6 +51,7 @@ class IsoReader is Reader
 
 
   // cant handle iso strings until `iso_array()` is added to string
+  // to be able to get the `iso` `array` from inside an `iso` string
 //  fun ref append(data: ByteSeq iso) =>
   fun ref append(data: Array[U8] iso) =>
     """
@@ -147,7 +148,8 @@ class IsoReader is Reader
   =>
     _read_bytes(len)?._2
 
-  fun ref _read_bytes(len: USize): (USize, (Array[U8] iso^ | Array[Array[U8] iso] iso^)) ?
+  fun ref _read_bytes(len: USize):
+    (USize, (Array[U8] iso^ | Array[Array[U8] iso] iso^)) ?
   =>
     """
     Return a number of bytes as either a contiguous array or an array of arrays
@@ -160,7 +162,8 @@ class IsoReader is Reader
       error
     end
 
-    // TODO: rewrite to avoid allocation of out array if all data if in first chunk
+    // TODO: rewrite to avoid allocation of out array if all data if in first
+    // chunk
     _available = _available - len
     var out = recover Array[Array[U8] iso] end
     var i = USize(0)
@@ -211,12 +214,15 @@ class IsoReader is Reader
       error
     end
 
-    var out = recover Array[Array[U8] iso] end
-
     let avail = _chunks(0)?.size()
+
+    // if we have enough data but not in a single contiguous chunk, call `block`
+    // to copy chunks together
     if avail < len then
-      error
+      return block(len)?
     end
+
+    var out = recover Array[Array[U8] iso] end
 
     var data = _chunks.shift()?
     let need = len

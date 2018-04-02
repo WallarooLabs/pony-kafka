@@ -86,10 +86,10 @@ trait KafkaBrokerConnection is CustomTCPConnection
         _KafkaHandler)._consumer_pause_all(this)
     end
 
-  be _consumer_resume(topic: String, partition_id: KafkaPartitionId) =>
+  be _consumer_resume(topic: String, partition_id: KafkaPartitionId, offset: KafkaOffset = -999) =>
     try
       ((get_handler() as CustomTCPConnectionHandler).notify as
-        _KafkaHandler)._consumer_resume(this, topic, partition_id)
+        _KafkaHandler)._consumer_resume(this, topic, partition_id, offset)
     end
 
   be _consumer_resume_all() =>
