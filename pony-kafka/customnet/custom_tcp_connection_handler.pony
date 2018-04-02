@@ -49,6 +49,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   var _connected: Bool = false
   var _readable: Bool = false
   var _writeable: Bool = false
+  var _throttled: Bool = false
   var _closed: Bool = false
   var _shutdown: Bool = false
   var _shutdown_peer: Bool = false
@@ -819,16 +820,23 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   fun ref _apply_backpressure() =>
     ifdef not windows then
       _writeable = false
+
       // this is safe because asio thread isn't currently subscribed
       // for a write event so will not be writing to the readable flag
       @pony_asio_event_set_writeable[None](_event, false)
       @pony_asio_event_resubscribe_write(_event)
     end
 
-    notify.throttled(_conn)
+    if not _throttled then
+      _throttled = true
+      notify.throttled(_conn)
+    end
 
   fun ref _release_backpressure() =>
-    notify.unthrottled(_conn)
+    if _throttled then
+      _throttled = false
+      notify.unthrottled(_conn)
+    end
 
   fun ref reconnect() =>
     if not _connected then
