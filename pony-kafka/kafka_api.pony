@@ -784,14 +784,21 @@ primitive _KafkaMessageSetCodecV0V1
             -1, KafkaTimestampNotAvailable, topic_partition) end)])
         end
 
-      if (msg_size.usize() - 4) > rb.size() then
+      if msg_size.usize() > rb.size() then
         logger(Fine) and logger.log(Fine,
           "Received partial message. Reader doesn't have Message size of: " +
-          (msg_size.usize() - 4).string() + " data in it. it has " +
+          msg_size.usize().string() + " data in it. it has " +
           rb.size().string() + " left.")
 
         // skip remaining data
-        try rb.skip(rb.size())? end
+        try
+          rb.skip(rb.size())?
+        else
+          return (offset, [(recover Array[U8] end, ClientErrorDecode("error skipping partial message data!"), recover KafkaMessageMetadata._create(
+            broker_conn, offset, -1, -1, true, -1, -1,
+            -1, KafkaTimestampNotAvailable, topic_partition) end)])
+        end
+
 
         // # messages == 0 and partial message encountered; increase max bytes
         // automagically as a temporary thing to ensure progress can be made
@@ -2303,11 +2310,14 @@ primitive _KafkaOffsetsV0 is _KafkaOffsetsApi
   fun encode_request_body(wb: Writer, conf: KafkaConfig val,
     topics_state: Map[String, _KafkaTopicState] box)
   =>
+    conf.logger(Fine) and conf.logger.log(Fine,
+      "Encoding request body for offsets request")
+
     let wb_topics = recover ref Writer end
     var num_topics_encoded: I32 = 0
     for (topic, topic_state) in topics_state.pairs() do
-      let num_partitions_encoded = encode_topic_partitions(wb_topics, topic,
-        topic_state.partitions_state)
+      let num_partitions_encoded = encode_topic_partitions(wb_topics, conf,
+        topic, topic_state.partitions_state)
       if num_partitions_encoded > 0 then
         num_topics_encoded = num_topics_encoded + 1
       end
@@ -2317,7 +2327,7 @@ primitive _KafkaOffsetsV0 is _KafkaOffsetsApi
     _KafkaI32Codec.encode(wb, num_topics_encoded)
     wb.writev(wb_topics.done())
 
-  fun encode_topic_partitions(wb: Writer, topic: String,
+  fun encode_topic_partitions(wb: Writer, conf: KafkaConfig val, topic: String,
     parts_state: Map[KafkaPartitionId, _KafkaTopicPartitionState] box): I32
   =>
     let wb_partitions = recover ref Writer end
@@ -2330,11 +2340,18 @@ primitive _KafkaOffsetsV0 is _KafkaOffsetsApi
         // this is intentional and must happen before the num partitions and
         // partitions array is encoded
         _KafkaStringCodec.encode(wb, topic)
+
+        conf.logger(Fine) and conf.logger.log(Fine,
+          "Encoding topic" + topic + " for offsets request")
       end
       num_partitions_encoded = num_partitions_encoded + 1
       _KafkaI32Codec.encode(wb_partitions, part_state.partition_id)
       _KafkaI64Codec.encode(wb_partitions, part_state.request_timestamp)
       _KafkaI32Codec.encode(wb_partitions, 1 /* always request only 1 offset */)
+      conf.logger(Fine) and conf.logger.log(Fine,
+        "Encoding partition " + part_state.partition_id.string() + " for topic "
+        + topic + " for offsets request with request_timestamp: " +
+        part_state.request_timestamp.string())
     end
 
     if num_partitions_encoded > 0 then
@@ -2461,11 +2478,14 @@ primitive _KafkaOffsetsV1 is _KafkaOffsetsApi
 
   fun encode_request_body(wb: Writer, conf: KafkaConfig val, topics_state:
     Map[String, _KafkaTopicState] box) =>
+    conf.logger(Fine) and conf.logger.log(Fine,
+      "Encoding request body for offsets request")
+
     let wb_topics = recover ref Writer end
     var num_topics_encoded: I32 = 0
     for (topic, topic_state) in topics_state.pairs() do
-      let num_partitions_encoded = encode_topic_partitions(wb_topics, topic,
-        topic_state.partitions_state)
+      let num_partitions_encoded = encode_topic_partitions(wb_topics, conf,
+        topic, topic_state.partitions_state)
       if num_partitions_encoded > 0 then
         num_topics_encoded = num_topics_encoded + 1
       end
@@ -2475,8 +2495,8 @@ primitive _KafkaOffsetsV1 is _KafkaOffsetsApi
     _KafkaI32Codec.encode(wb, num_topics_encoded)
     wb.writev(wb_topics.done())
 
-  fun encode_topic_partitions(wb: Writer, topic: String, parts_state: Map[KafkaPartitionId,
-    _KafkaTopicPartitionState] box): I32
+  fun encode_topic_partitions(wb: Writer, conf: KafkaConfig val, topic: String,
+    parts_state: Map[KafkaPartitionId, _KafkaTopicPartitionState] box): I32
   =>
     let wb_partitions = recover ref Writer end
     var num_partitions_encoded: I32 = 0
@@ -2488,10 +2508,17 @@ primitive _KafkaOffsetsV1 is _KafkaOffsetsApi
         // this is intentional and must happen before the num partitions and
         // partitions array is encoded
         _KafkaStringCodec.encode(wb, topic)
+
+        conf.logger(Fine) and conf.logger.log(Fine,
+          "Encoding topic" + topic + " for offsets request")
       end
       num_partitions_encoded = num_partitions_encoded + 1
       _KafkaI32Codec.encode(wb_partitions, part_state.partition_id)
       _KafkaI64Codec.encode(wb_partitions, part_state.request_timestamp)
+      conf.logger(Fine) and conf.logger.log(Fine,
+        "Encoding partition " + part_state.partition_id.string() + " for topic "
+        + topic + " for offsets request with request_timestamp: " +
+        part_state.request_timestamp.string())
     end
 
     if num_partitions_encoded > 0 then

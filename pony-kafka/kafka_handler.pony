@@ -117,8 +117,9 @@ class _KafkaTopicPartitionState
   var request_timestamp: KafkaTimestamp
   var error_code: KafkaApiError = 0
   var timestamp: (KafkaTimestamp | None) = None
-  var request_offset: KafkaOffset = -1
+  var request_offset: KafkaOffset = 0
   var max_bytes: I32
+  var enabled: Bool = true
   var paused: Bool = true
   var current_leader: Bool = false
   // Messages already sent to broker that we get a failure response for
@@ -151,7 +152,7 @@ class _KafkaTopicPartitionState
     for i in isrs.values() do
       isrs_str.>append(", ").>append(i.string())
     end
-    "KafkaTopicPartitionMetadata: [ "
+    "KafkaTopicPartitionState: [ "
       + "partition_error_code = " + partition_error_code.string()
       + ", partition_id = " + partition_id.string()
       + ", leader = " + leader.string()
@@ -388,7 +389,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
     try
       _state.topics_state(topic)?.message_handler = consumer_handler.clone()
     else
-      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+      _kafka_client._unrecoverable_error(KafkaErrorReport(
+        ClientErrorShouldNeverHappen(_name +
         "Error updating message handler for topic: " + topic +
         ". This should never happen."),
         topic, -1))
@@ -403,7 +405,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
     try
       _state.topics_state(topic)?.partitions_state(partition_id)?.paused = true
     else
-      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+      _kafka_client._unrecoverable_error(KafkaErrorReport(
+        ClientErrorShouldNeverHappen(_name +
         "Error pausing consumer for topic: " + topic + " and partition: " +
         partition_id.string() + "."),
         topic, -1))
@@ -418,10 +421,21 @@ class _KafkaHandler is CustomTCPConnectionNotify
     end
 
   fun ref _consumer_resume(conn: KafkaBrokerConnection ref, topic: String,
-    partition_id: KafkaPartitionId) =>
+    partition_id: KafkaPartitionId, offset: KafkaOffset = -999) =>
     // set to unpaused
     try
       _state.topics_state(topic)?.partitions_state(partition_id)?.paused = false
+
+      // override offset for next fetch request
+      // TODO: make sure this doesn't get overridden if there's already a
+      // fetch_request in progress
+      if offset != -999 then
+        _conf.logger(Fine) and _conf.logger.log(Fine, _name +
+          " Setting offset to " + offset.string() + " for topic: " + topic +
+          " and partition: " + partition_id.string())
+        _state.topics_state(topic)?.partitions_state(partition_id)?
+                .request_offset = offset
+      end
 
       let was_totally_paused = _all_topics_partitions_paused = false
 
@@ -431,7 +445,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
         consume_messages(conn)
       end
     else
-      _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+      _kafka_client._unrecoverable_error(KafkaErrorReport(
+        ClientErrorShouldNeverHappen(_name +
         "Error resuming consumer for topic: " + topic + " and partition: " +
         partition_id.string() + "."),
         topic, partition_id))
@@ -1137,7 +1152,9 @@ class _KafkaHandler is CustomTCPConnectionNotify
 
     // TODO: figure out why this happens and fix it!
     if _broker_apis_to_use.size() == 1 then
-      _conf.logger(Warn) and _conf.logger.log(Warn, _name + "WARNING!!!!! Metadata requested but still in state: " +  _statemachine.current_state().string())
+      _conf.logger(Warn) and _conf.logger.log(Warn, _name +
+      "WARNING!!!!! Metadata requested but still in state: " +
+      _statemachine.current_state().string())
     end
 
     let correlation_id = _next_correlation_id()
@@ -1158,7 +1175,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
     let offsets_api = try _broker_apis_to_use(_KafkaOffsetsV0.api_key())? as
         _KafkaOffsetsApi
       else
-        _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+        _kafka_client._unrecoverable_error(KafkaErrorReport(
+          ClientErrorShouldNeverHappen(_name +
           "Error getting offsets api to use. This should never happen."),
           "N/A", -1))
         return None
@@ -1185,15 +1203,27 @@ class _KafkaHandler is CustomTCPConnectionNotify
       let topic = topic_meta.topic
       let topic_state = try _state.topics_state(topic)?
         else
-          _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
+          _kafka_client._unrecoverable_error(KafkaErrorReport(
+            ClientErrorShouldNeverHappen(_name +
             "Unable to get topic state for topic: " + topic +
             "! This should never happen."),
             topic, -1))
           return
         end
 
+      let topic_conf = try _conf.topics(topic)?
+        else
+          _kafka_client._unrecoverable_error(KafkaErrorReport(
+            ClientErrorShouldNeverHappen(_name +
+            "Unable to get topic config for topic: " + topic +
+            "! This should never happen."),
+            topic, -1))
+          return
+        end
+
       // TODO: add error handling for invalid topics and other possible errors
-      let kafka_topic_error = MapKafkaError(_conf.logger, topic_meta.topic_error_code)
+      let kafka_topic_error =
+        MapKafkaError(_conf.logger, topic_meta.topic_error_code)
       match kafka_topic_error
       | ErrorNone => None
       | ErrorLeaderNotAvailable =>
@@ -1208,7 +1238,8 @@ class _KafkaHandler is CustomTCPConnectionNotify
           refresh_metadata(conn)
         end
       else
-        // fall through for ErrorUnknownTopicOrPartition, ErrorInvalidTopicException and ErrorTopicAuthorizationFailed
+        // fall through for ErrorUnknownTopicOrPartition,
+        // ErrorInvalidTopicException and ErrorTopicAuthorizationFailed
         // and anything else if it happens
         _conf.logger(Error) and _conf.logger.log(Error, _name +
           "Encountered topic error for topic: " + topic +
@@ -1234,6 +1265,54 @@ class _KafkaHandler is CustomTCPConnectionNotify
               partition_id, part_meta.leader, part_meta.replicas,
               part_meta.isrs, part_meta.request_timestamp,
               _conf.partition_fetch_max_bytes)
+
+            // get initial offset to start from
+            let initial_offset =
+              try
+                topic_conf.partitions(partition_id)?
+              else
+                // disable partition if it wasn't in the allowed partition list
+                // if allowed partitions size is 0 then all partitions are allowed
+                if topic_conf.partitions.size() > 0 then
+                  ps.enabled = false
+                  ps.current_leader = false
+                end
+                topic_conf.default_consumer_start_offset
+              end
+
+            // TODO: Do we need to do anything special for when a new partition
+            //  is added to an existing topic we're reading from? Should that
+            // always start at BEGINNING?
+            match initial_offset
+            | KafkaOffsetBeginning
+            => ps.request_offset = 0
+               ps.request_timestamp = KafkaOffsetBeginning()
+               _conf.logger(Fine) and _conf.logger.log(Fine, _name +
+                 "Requesting Earliest Offset for topic: " + topic +
+                 ", partition: " + partition_id.string() +
+                 " ps.request_timestamp: " + ps.request_timestamp.string())
+            | KafkaOffsetEnd
+            => ps.request_offset = 0
+               ps.request_timestamp = KafkaOffsetEnd()
+               _conf.logger(Fine) and _conf.logger.log(Fine, _name +
+                 "Requesting Largest Offset for topic: " + topic +
+                 ", partition: " + partition_id.string() +
+                 " ps.request_timestamp: " + ps.request_timestamp.string())
+            | let o: KafkaOffset
+            => ps.request_offset = o
+               // if the requested initial offset is relative to the END so we
+               // need to get the end offset and do some math once we get it
+               // if the requested initial offset is absolute, we need to cap it
+               // at current end offset
+               ps.request_timestamp = KafkaOffsetEnd()
+               _conf.logger(Fine) and _conf.logger.log(Fine, _name +
+                 "Requesting Largest Offset for topic: " + topic +
+                 ", partition: " + partition_id.string() +
+                 " ps.request_timestamp: " + ps.request_timestamp.string() +
+                 " because it we need a relative offset of: " + o.string() +
+                 " from it (or we need to cap the absolute offset).")
+            end
+
             topic_state.partitions_state(partition_id) = ps
             ps
           end
@@ -1270,7 +1349,10 @@ class _KafkaHandler is CustomTCPConnectionNotify
         let old_leader = part_state.leader = part_meta.leader
         part_state.replicas = part_meta.replicas
         part_state.isrs = part_meta.isrs
-        part_state.request_timestamp = part_meta.request_timestamp
+
+        if part_state.enabled == false then
+          continue
+        end
 
         if part_meta.leader == _connection_broker_id then
           if current_partition_new or (old_leader == part_meta.leader) then
@@ -1575,21 +1657,33 @@ class _KafkaHandler is CustomTCPConnectionNotify
           return
         end
 
-        try
-          _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
-            .error_code = part.error_code
-          if _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
-            .request_offset == -1 then
+        let ps =
+          try
             _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
-              .request_offset = part.offset
-            _state.topics_state(topic.topic)?.partitions_state(part.partition_id)?
-              .timestamp = part.timestamp
+          else
+            _kafka_client._unrecoverable_error(KafkaErrorReport(
+              ClientErrorShouldNeverHappen(_name +
+              "Error getting state for topic/partition."),
+              topic.topic, part.partition_id))
+            return
           end
-        else
-          _kafka_client._unrecoverable_error(KafkaErrorReport(ClientErrorShouldNeverHappen(_name +
-            "Error getting state for topic/partition."),
-            topic.topic, part.partition_id))
-          return
+
+        ps.error_code = part.error_code
+
+        if ps.request_offset == 0 then
+          ps.request_offset = part.offset
+          ps.timestamp = part.timestamp
+        elseif ps.request_offset < 0 then
+          // requested initial offset was relative to END so we need to add the
+          // received offset with the negative offset to get final offset to
+          // start from
+          ps.request_offset = ps.request_offset + part.offset
+          ps.timestamp = part.timestamp
+        elseif ps.request_offset > 0 then
+          // requested initial offset was absolute so we need to ensure it is
+          // not larger than current END offset to avoid errors
+          ps.request_offset = ps.request_offset.min(part.offset)
+          ps.timestamp = part.timestamp
         end
       end
     end

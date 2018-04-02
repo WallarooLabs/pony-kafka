@@ -47,9 +47,10 @@ type ConsumerRequestOffset is (KafkaOffsetBeginning |
   KafkaOffsetEnd | KafkaOffset)
 
 primitive KafkaOffsetBeginning
+  fun apply(): KafkaOffset => -2
 
 primitive KafkaOffsetEnd
-
+  fun apply(): KafkaOffset => -1
 
 
 primitive _KafkaProducerAuth
@@ -579,6 +580,7 @@ class KafkaProducerMapping
 
   // main logic for sending messages to brokers
   // TODO: Add ability to specify timestamp... should timestamp be for all messages or per message in this case?
+  // TODO: Add ability to specify specific partition_id... should partition_id be for all messages or per message in this case?
   fun ref send_topic_messages(
     topic: String, msgs: Array[(Any tag, (ByteSeq | Array[ByteSeq] val),
     (None | ByteSeq | Array[ByteSeq] val))]):
@@ -688,7 +690,8 @@ class KafkaProducerMapping
   fun ref send_topic_message(topic: String, opaque: Any tag,
     value: (ByteSeq | Array[ByteSeq] val),
     key: (None | ByteSeq | Array[ByteSeq] val) = None,
-    ts: (KafkaTimestamp | None) = None):
+    ts: (KafkaTimestamp | None) = None,
+    partition_id: (KafkaPartitionId | None) = None):
     (None | (KafkaError, KafkaPartitionId, Any tag))
   =>
     if conf.producer_topics.contains(topic) then
@@ -716,10 +719,14 @@ class KafkaProducerMapping
         // run user specified message partitioner to determine which partition
         // the message needs to be sent to
         let part_id =
-          try
-            message_partitioner(key, key_size, tm.size().i32()) as KafkaPartitionId
+          match partition_id
+          | let p: KafkaPartitionId => p
           else
-            -1
+            try
+              message_partitioner(key, key_size, tm.size().i32()) as KafkaPartitionId
+            else
+              -1
+            end
           end
 
         if (part_id < 0) or (part_id > tm.size().i32()) then
@@ -968,7 +975,7 @@ actor KafkaClient
 
   // TODO: Add ability to specify offset to resume from with offset of -999 means continue from current (need to propagate to broker connections and also make sure that it doesn't get overwritten by a fetch reponse in case of an outstanding request)
   // to both this and consumer_resume_all
-  be consumer_resume(topic: String, partition_id: KafkaPartitionId) =>
+  be consumer_resume(topic: String, partition_id: KafkaPartitionId, offset: KafkaOffset = -999) =>
     var something_resumed: Bool = false
 
     try
@@ -991,7 +998,7 @@ actor KafkaClient
 
     if something_resumed then
       for (_, bc) in _brokers.values() do
-        bc._consumer_resume(topic, partition_id)
+        bc._consumer_resume(topic, partition_id, offset)
       end
     end
 
