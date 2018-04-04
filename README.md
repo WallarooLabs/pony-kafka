@@ -10,7 +10,7 @@ The main reason this exists is because the alternatives weren't necessarily goin
 
 # Building
 
-You need [ponyc](https://github.com/ponylang/ponyc) to compile `pony-kafka`. This is currently tested with `ponyc` version 0.21.3.
+You need [ponyc](https://github.com/ponylang/ponyc) to compile `pony-kafka`. This is currently tested with `ponyc` version master.
 
 You also need the following (in addition to what is needed for Pony itself):
 
