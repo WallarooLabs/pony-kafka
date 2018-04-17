@@ -512,7 +512,7 @@ class KafkaTopicConfig is Equatable[KafkaTopicConfig box]
         parts'
       end
 
-  fun hash(): U64 =>
+  fun hash(): USize =>
     topic_name.hash()
 
   fun eq(that: KafkaTopicConfig box): Bool =>

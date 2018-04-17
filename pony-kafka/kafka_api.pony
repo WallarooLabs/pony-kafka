@@ -62,7 +62,7 @@ class _KafkaBroker is Equatable[_KafkaBroker box]
   fun ref set_rack(rack': String) =>
     rack = rack'
 
-  fun hash(): U64 =>
+  fun hash(): USize =>
     host.hash() xor port.hash()
 
   fun eq(that: _KafkaBroker box): Bool =>
@@ -167,7 +167,7 @@ class val KafkaTopicPartition is Equatable[KafkaTopicPartition box]
     topic = topic'
     partition_id = partition_id'
 
-  fun hash(): U64 =>
+  fun hash(): USize =>
     topic.hash() xor partition_id.hash()
 
   fun eq(that: KafkaTopicPartition box): Bool =>
