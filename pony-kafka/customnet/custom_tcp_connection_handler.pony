@@ -333,34 +333,10 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
         var fd = @pony_asio_event_fd(event)
         _connect_count = _connect_count - 1
 
-        if not _connected and not _closed then
-          // We don't have a connection yet.
-          if @pony_os_connected[Bool](fd) then
-            // The connection was successful, make it ours.
-            _fd = fd
-            _event = event
-            _connected = true
-            _writeable = true
-
-            notify.connected(_conn)
-            _queue_read()
-
-            // Don't call _complete_writes, as Windows will see this as a
-            // closed connection.
-            ifdef not windows then
-              if _pending_writes() then
-                //sent all data; release backpressure
-                _release_backpressure()
-              end
-            end
-          else
-            // The connection failed, unsubscribe the event and close.
-            @pony_asio_event_unsubscribe(event)
-            @pony_os_socket_close[None](fd)
-            _notify_connecting()
-          end
-        elseif not _connected and _closed then
-          @printf[I32]("Reconnection asio event\n".cstring())
+        if (not _connected and not _closed)
+          or (not _connected and _closed) then
+          // We don't have a connection yet
+          // or we have a re-connection after a disonnect.
 
           if @pony_os_connected[Bool](fd) then
             // The connection was successful, make it ours.
@@ -369,12 +345,14 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
 
             // clear anything pending to be sent because on recovery we're
             // going to have to replay from our queue when requested
+            // for new connections this is effectively a no-op
             _pending_writev.clear()
             _pending.clear()
             _pending_writev_total = 0
 
             _connected = true
             _writeable = true
+            _readable = true
 
             _closed = false
             _shutdown = false
@@ -382,6 +360,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
 
             notify.connected(_conn)
             _queue_read()
+            pending_reads()
 
             // Don't call _complete_writes, as Windows will see this as a
             // closed connection.
