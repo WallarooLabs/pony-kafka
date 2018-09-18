@@ -28,6 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 use "collections"
+use "itertools"
 
 class IsoReader is Reader
   """
@@ -50,34 +51,38 @@ class IsoReader is Reader
     _available = 0
 
 
-  // cant handle iso strings until `iso_array()` is added to string
-  // to be able to get the `iso` `array` from inside an `iso` string
-//  fun ref append(data: ByteSeq iso) =>
-  fun ref append(data: Array[U8] iso) =>
+  fun ref _append(data: ByteSeq iso) =>
     """
     Add a chunk of data.
     """
     let data_array =
       match consume data
       | let data': Array[U8] iso => consume data'
-//      | let data': String iso => (consume data').array()
+      | let data': String iso => (consume data').iso_array()
       end
 
     _available = _available + data_array.size()
     _chunks.push(consume data_array)
 
-/*
-  fun ref append(data: Array[ByteSeq iso] iso) =>
+  fun ref append(data: (ByteSeq iso | Array[ByteSeq iso] iso)) =>
     """
     Add a chunk of data.
     """
-    for d in data.values() do
-      match d
-      | let s: String => append(s.array())
-      | let a: Array[U8] val => append(a)
+    match consume data
+    | let data': ByteSeq iso => _append(consume data')
+    | let data': Array[ByteSeq iso] iso =>
+      let tmp_data = consume ref data'
+      // reverse in place to avoid having to do expensive shifts for each element
+      tmp_data.reverse_in_place()
+      while tmp_data.size() > 0 do
+        try
+          let d = tmp_data.pop()?
+          _append(consume d)
+        else
+          break
+        end
       end
     end
-*/
 
   fun ref skip(n: USize) ? =>
     """
@@ -102,6 +107,7 @@ class IsoReader is Reader
       error
     end
 
+
   fun ref block(len: USize): Array[U8] iso^ ? =>
     """
     Return a block as a contiguous chunk of memory.
@@ -112,11 +118,13 @@ class IsoReader is Reader
     | let a: Array[U8] iso =>
       a
     | let arr: Array[Array[U8] iso] iso =>
-      var out = arr.shift()?
+      // reverse in place to avoid having to do expensive shifts for each element
+      arr.reverse_in_place()
+      var out = arr.pop()?
       var i = out.size()
       out.undefined(num_bytes)
       while arr.size() > 0 do
-        let a = recover val arr.shift()? end
+        let a = recover val arr.pop()? end
         out = recover
           let r = consume ref out
           a.copy_to(r, 0, i, a.size())
@@ -127,18 +135,217 @@ class IsoReader is Reader
       out
     end
 
+  fun ref read_u8(): U8 ? =>
+    """
+    Read a U8.
+    """
+    read_byte()?
+
+  fun ref read_u16(): U16 ? =>
+    """
+    Read a U16.
+    """
+    let num_bytes = U16(0).bytewidth()
+    if _available < num_bytes then
+      error
+    end
+    try
+      let r = _chunks(0)?.read_u16(0)?
+      if _chunks(0)?.size() > num_bytes then
+        _chunks(0)?.trim_in_place(num_bytes)
+      else
+        _chunks.shift()?
+      end
+      _available = _available - num_bytes
+      r
+    else
+      let data = read_bytes(num_bytes)?
+
+      _decode_u16(consume data)?
+    end
+
+  fun _decode_u16(data: (Array[U8] val | Array[Array[U8] iso] val)): U16 ? =>
+    match data
+    | let d: Array[U8] val =>
+      d.read_u16(0)?
+    | let d: (Array[Array[U8] iso] val) =>
+      _decode_u16_array(d)?
+    end
+
+  fun _decode_u16_array(data: Array[Array[U8] iso] val): U16 ? =>
+    var out: U16 = 0
+    let iters = Array[Iterator[U8]]
+    for a in data.values() do
+      iters.push(a.values())
+    end
+    let iter_all = Iter[U8].chain(iters.values())
+    var i: U16 = 0
+    while iter_all.has_next() do
+      ifdef bigendian then
+        out = (out << 8) or iter_all.next()?.u16()
+      else
+        out = out or (iter_all.next()?.u16() << (i * 8))
+        i = i + 1
+      end
+    end
+    out
+
+  fun ref read_u32(): U32 ? =>
+    """
+    Read a U32.
+    """
+    let num_bytes = U32(0).bytewidth()
+    if _available < num_bytes then
+      error
+    end
+    try
+      let r = _chunks(0)?.read_u32(0)?
+      if _chunks(0)?.size() > num_bytes then
+        _chunks(0)?.trim_in_place(num_bytes)
+      else
+        _chunks.shift()?
+      end
+      _available = _available - num_bytes
+      r
+    else
+      let data = read_bytes(num_bytes)?
+
+      _decode_u32(consume data)?
+    end
+
+  fun _decode_u32(data: (Array[U8] val | Array[Array[U8] iso] val)): U32 ? =>
+    match data
+    | let d: Array[U8] val =>
+      d.read_u32(0)?
+    | let d: (Array[Array[U8] iso] val) =>
+      _decode_u32_array(d)?
+    end
+
+  fun _decode_u32_array(data: Array[Array[U8] iso] val): U32 ? =>
+    var out: U32 = 0
+    let iters = Array[Iterator[U8]]
+    for a in data.values() do
+      iters.push(a.values())
+    end
+    let iter_all = Iter[U8].chain(iters.values())
+    var i: U32 = 0
+    while iter_all.has_next() do
+      ifdef bigendian then
+        out = (out << 8) or iter_all.next()?.u32()
+      else
+        out = out or (iter_all.next()?.u32() << (i * 8))
+        i = i + 1
+      end
+    end
+    out
+
+  fun ref read_u64(): U64 ? =>
+    """
+    Read a U64.
+    """
+    let num_bytes = U64(0).bytewidth()
+    if _available < num_bytes then
+      error
+    end
+    try
+      let r = _chunks(0)?.read_u64(0)?
+      if _chunks(0)?.size() > num_bytes then
+        _chunks(0)?.trim_in_place(num_bytes)
+      else
+        _chunks.shift()?
+      end
+      _available = _available - num_bytes
+      r
+    else
+      let data = read_bytes(num_bytes)?
+
+      _decode_u64(consume data)?
+    end
+
+  fun _decode_u64(data: (Array[U8] val | Array[Array[U8] iso] val)): U64 ? =>
+    match data
+    | let d: Array[U8] val =>
+      d.read_u64(0)?
+    | let d: (Array[Array[U8] iso] val) =>
+      _decode_u64_array(d)?
+    end
+
+  fun _decode_u64_array(data: Array[Array[U8] iso] val): U64 ? =>
+    var out: U64 = 0
+    let iters = Array[Iterator[U8]]
+    for a in data.values() do
+      iters.push(a.values())
+    end
+    let iter_all = Iter[U8].chain(iters.values())
+    var i: U64 = 0
+    while iter_all.has_next() do
+      ifdef bigendian then
+        out = (out << 8) or iter_all.next()?.u64()
+      else
+        out = out or (iter_all.next()?.u64() << (i * 8))
+        i = i + 1
+      end
+    end
+    out
+
+  fun ref read_u128(): U128 ? =>
+    """
+    Read a U128.
+    """
+    let num_bytes = U128(0).bytewidth()
+    if _available < num_bytes then
+      error
+    end
+    try
+      let r = _chunks(0)?.read_u128(0)?
+      if _chunks(0)?.size() > num_bytes then
+        _chunks(0)?.trim_in_place(num_bytes)
+      else
+        _chunks.shift()?
+      end
+      _available = _available - num_bytes
+      r
+    else
+      let data = read_bytes(num_bytes)?
+
+      _decode_u128(consume data)?
+    end
+
+  fun _decode_u128(data: (Array[U8] val | Array[Array[U8] iso] val)): U128 ? =>
+    match data
+    | let d: Array[U8] val =>
+      d.read_u128(0)?
+    | let d: (Array[Array[U8] iso] val) =>
+      _decode_u128_array(d)?
+    end
+
+  fun _decode_u128_array(data: Array[Array[U8] iso] val): U128 ? =>
+    var out: U128 = 0
+    let iters = Array[Iterator[U8]]
+    for a in data.values() do
+      iters.push(a.values())
+    end
+    let iter_all = Iter[U8].chain(iters.values())
+    var i: U128 = 0
+    while iter_all.has_next() do
+      ifdef bigendian then
+        out = (out << 8) or iter_all.next()?.u128()
+      else
+        out = out or (iter_all.next()?.u128() << (i * 8))
+        i = i + 1
+      end
+    end
+    out
+
   fun ref read_byte(): U8 ? =>
     """
     Get a single byte.
     """
-    if _available < 1 then
-      error
-    end
-
-    _available = _available - 1
-    let r = _chunks(0)?(0)?
-    if _chunks(0)?.size() > 1 then
-      _chunks(0)?.trim_in_place(1)
+    let num_bytes = U8(0).bytewidth()
+    let r = _chunks(0)?.read_u8(0)?
+    _available = _available - num_bytes
+    if _chunks(0)?.size() > num_bytes then
+      _chunks(0)?.trim_in_place(num_bytes)
     else
       _chunks.shift()?
     end
@@ -201,11 +408,6 @@ class IsoReader is Reader
     Return a block as a contiguous chunk of memory without copying if possible
     or throw an error.
     """
-    // TODO: enhance to fall back to a copy if have non-contiguous data and
-    // return an iso? Not possible because iso/val distinction doesn't exist at
-    // runtime? Maybe need to enhance callers to be able to work with
-    // non-contiguous memory?
-
     if len == 0 then
       return recover Array[U8] end
     end

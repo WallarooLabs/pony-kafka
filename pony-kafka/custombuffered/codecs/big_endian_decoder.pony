@@ -29,14 +29,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use ".."
 use "../../utils/bool_converter"
-use "itertools"
 
 primitive BigEndianDecoder
   fun u8(rb: Reader): U8 ? =>
     """
     Get a U8. Raise an error if there isn't enough data.
     """
-    rb.read_byte()?
+    rb.read_u8()?
 
   fun bool(rb: Reader): Bool ? =>
     """
@@ -54,36 +53,11 @@ primitive BigEndianDecoder
     """
     Get a big-endian U16.
     """
-    let data = rb.read_bytes(2)?
-
-    _decode_u16(consume data)?
-
-  fun _decode_u16(data: (Array[U8] val | Array[Array[U8] val] val | Array[Array[U8] iso] val)): U16 ? =>
-    match data
-    | let d: Array[U8] val =>
-      (d(0)?.u16() << 8) or d(1)?.u16()
-    | let d: (Array[Array[U8] val] val | Array[Array[U8] iso] val) =>
-      _decode_u16_array(d)?
+    ifdef bigendian then
+      rb.read_u16()?
+    else
+      rb.read_u16()?.bswap()
     end
-
-  fun _decode_u16_array(data: (Array[Array[U8] val] val | Array[Array[U8] iso] val)): U16 ? =>
-    var out: U16 = 0
-    let iters = Array[Iterator[U8]]
-    match data
-    | let arr: Array[Array[U8] val] val =>
-      for a in arr.values() do
-        iters.push(a.values())
-      end
-    | let arr: Array[Array[U8] iso] val =>
-      for a in arr.values() do
-        iters.push(a.values())
-      end
-    end
-    let iter_all = Iter[U8].chain(iters.values())
-    while iter_all.has_next() do
-      out = (out << 8) or iter_all.next()?.u16()
-    end
-    out
 
   fun i16(rb: Reader): I16 ? =>
     """
@@ -95,37 +69,11 @@ primitive BigEndianDecoder
     """
     Get a big-endian U32.
     """
-    let data = rb.read_bytes(4)?
-
-    _decode_u32(consume data)?
-
-  fun _decode_u32(data: (Array[U8] val | Array[Array[U8] val] val | Array[Array[U8] iso] val)): U32 ? =>
-    match data
-    | let d: Array[U8] val =>
-      (d(0)?.u32() << 24) or (d(1)?.u32() << 16) or
-      (d(2)?.u32() << 8) or d(3)?.u32()
-    | let d: (Array[Array[U8] val] val | Array[Array[U8] iso] val) =>
-      _decode_u32_array(d)?
+    ifdef bigendian then
+      rb.read_u32()?
+    else
+      rb.read_u32()?.bswap()
     end
-
-  fun _decode_u32_array(data: (Array[Array[U8] val] val | Array[Array[U8] iso] val)): U32 ? =>
-    var out: U32 = 0
-    let iters = Array[Iterator[U8]]
-    match data
-    | let arr: Array[Array[U8] val] val =>
-      for a in arr.values() do
-        iters.push(a.values())
-      end
-    | let arr: Array[Array[U8] iso] val =>
-      for a in arr.values() do
-        iters.push(a.values())
-      end
-    end
-    let iter_all = Iter[U8].chain(iters.values())
-    while iter_all.has_next() do
-      out = (out << 8) or iter_all.next()?.u32()
-    end
-    out
 
   fun i32(rb: Reader): I32 ? =>
     """
@@ -137,39 +85,11 @@ primitive BigEndianDecoder
     """
     Get a big-endian U64.
     """
-    let data = rb.read_bytes(8)?
-
-    _decode_u64(consume data)?
-
-  fun _decode_u64(data: (Array[U8] val | Array[Array[U8] val] val | Array[Array[U8] iso] val)): U64 ? =>
-    match data
-    | let d: Array[U8] val =>
-      (d(0)?.u64() << 56) or (d(1)?.u64() << 48) or
-      (d(2)?.u64() << 40) or (d(3)?.u64() << 32) or
-      (d(4)?.u64() << 24) or (d(5)?.u64() << 16) or
-      (d(6)?.u64() << 8) or d(7)?.u64()
-    | let d: (Array[Array[U8] val] val | Array[Array[U8] iso] val) =>
-      _decode_u64_array(d)?
+    ifdef bigendian then
+      rb.read_u64()?
+    else
+      rb.read_u64()?.bswap()
     end
-
-  fun _decode_u64_array(data: (Array[Array[U8] val] val | Array[Array[U8] iso] val)): U64 ? =>
-    var out: U64 = 0
-    let iters = Array[Iterator[U8]]
-    match data
-    | let arr: Array[Array[U8] val] val =>
-      for a in arr.values() do
-        iters.push(a.values())
-      end
-    | let arr: Array[Array[U8] iso] val =>
-      for a in arr.values() do
-        iters.push(a.values())
-      end
-    end
-    let iter_all = Iter[U8].chain(iters.values())
-    while iter_all.has_next() do
-      out = (out << 8) or iter_all.next()?.u64()
-    end
-    out
 
   fun i64(rb: Reader): I64 ? =>
     """
@@ -177,52 +97,19 @@ primitive BigEndianDecoder
     """
     u64(rb)?.i64()
 
-
   fun u128(rb: Reader): U128 ? =>
     """
     Get a big-endian U128.
     """
-    let data = rb.read_bytes(16)?
-
-    _decode_u128(consume data)?
-
-  fun _decode_u128(data: (Array[U8] val | Array[Array[U8] val] val | Array[Array[U8] iso] val)): U128 ? =>
-    match data
-    | let d: Array[U8] val =>
-      (d(0)?.u128() << 120) or (d(1)?.u128() << 112) or
-      (d(2)?.u128() << 104) or (d(3)?.u128() << 96) or
-      (d(4)?.u128() << 88) or (d(5)?.u128() << 80) or
-      (d(6)?.u128() << 72) or (d(7)?.u128() << 64) or
-      (d(8)?.u128() << 56) or (d(9)?.u128() << 48) or
-      (d(10)?.u128() << 40) or (d(11)?.u128() << 32) or
-      (d(12)?.u128() << 24) or (d(13)?.u128() << 16) or
-      (d(14)?.u128() << 8) or d(15)?.u128()
-    | let d: (Array[Array[U8] val] val | Array[Array[U8] iso] val) =>
-      _decode_u128_array(d)?
+    ifdef bigendian then
+      rb.read_u128()?
+    else
+      rb.read_u128()?.bswap()
     end
-
-  fun _decode_u128_array(data: (Array[Array[U8] val] val | Array[Array[U8] iso] val)): U128 ? =>
-    var out: U128 = 0
-    let iters = Array[Iterator[U8]]
-    match data
-    | let arr: Array[Array[U8] val] val =>
-      for a in arr.values() do
-        iters.push(a.values())
-      end
-    | let arr: Array[Array[U8] iso] val =>
-      for a in arr.values() do
-        iters.push(a.values())
-      end
-    end
-    let iter_all = Iter[U8].chain(iters.values())
-    while iter_all.has_next() do
-      out = (out << 8) or iter_all.next()?.u128()
-    end
-    out
 
   fun i128(rb: Reader): I128 ? =>
     """
-    Get a big-endian I129.
+    Get a big-endian I128.
     """
     u128(rb)?.i128()
 
@@ -243,7 +130,7 @@ primitive BigEndianDecoder
     Peek at a U8 at the given offset. Raise an error if there isn't enough
     data.
     """
-    rb.peek_byte(offset)?
+    rb.peek_u8(offset)?
 
   fun peek_i8(rb: PeekableReader box, offset: USize = 0): I8 ? =>
     """
@@ -255,9 +142,11 @@ primitive BigEndianDecoder
     """
     Peek at a big-endian U16.
     """
-    let data = rb.peek_bytes(2, offset)?
-
-    _decode_u16(data)?
+    ifdef bigendian then
+      rb.peek_u16(offset)?
+    else
+      rb.peek_u16(offset)?.bswap()
+    end
 
   fun peek_i16(rb: PeekableReader box, offset: USize = 0): I16 ? =>
     """
@@ -269,9 +158,11 @@ primitive BigEndianDecoder
     """
     Peek at a big-endian U32.
     """
-    let data = rb.peek_bytes(4, offset)?
-
-    _decode_u32(data)?
+    ifdef bigendian then
+      rb.peek_u32(offset)?
+    else
+      rb.peek_u32(offset)?.bswap()
+    end
 
   fun peek_i32(rb: PeekableReader box, offset: USize = 0): I32 ? =>
     """
@@ -283,9 +174,11 @@ primitive BigEndianDecoder
     """
     Peek at a big-endian U64.
     """
-    let data = rb.peek_bytes(8, offset)?
-
-    _decode_u64(data)?
+    ifdef bigendian then
+      rb.peek_u64(offset)?
+    else
+      rb.peek_u64(offset)?.bswap()
+    end
 
   fun peek_i64(rb: PeekableReader box, offset: USize = 0): I64 ? =>
     """
@@ -297,13 +190,15 @@ primitive BigEndianDecoder
     """
     Peek at a big-endian U128.
     """
-    let data = rb.peek_bytes(16, offset)?
-
-    _decode_u128(data)?
+    ifdef bigendian then
+      rb.peek_u128(offset)?
+    else
+      rb.peek_u128(offset)?.bswap()
+    end
 
   fun peek_i128(rb: PeekableReader box, offset: USize = 0): I128 ? =>
     """
-    Peek at a big-endian I129.
+    Peek at a big-endian I128.
     """
     peek_u128(rb, offset)?.i128()
 

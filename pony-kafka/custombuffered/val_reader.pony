@@ -28,6 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 use "collections"
+use "itertools"
 
 class ValReader is PeekableReader
   """
@@ -129,10 +130,7 @@ class ValReader is PeekableReader
     | let data': ByteSeq => _append(data')
     | let data': Array[ByteSeq] val =>
       for d in data'.values() do
-        match d
-        | let s: String => append(s.array())
-        | let a: Array[U8] val => append(a)
-        end
+        _append(d)
       end
     end
 
@@ -231,16 +229,235 @@ class ValReader is PeekableReader
 
     out
 
+  fun ref read_u8(): U8 ? =>
+    """
+    Read a U8.
+    """
+    read_byte()?
+
+  fun ref read_u16(): U16 ? =>
+    """
+    Read a U16.
+    """
+    let num_bytes = U16(0).bytewidth()
+    if _available < num_bytes then
+      error
+    end
+    try
+      let node = _chunks.head()?
+      (var data, var offset) = node()?
+      let r = data.read_u16(offset)?
+
+      offset = offset + num_bytes
+      _available = _available - num_bytes
+      if offset < data.size() then
+        node()? = (data, offset)
+      else
+        _chunks.shift()?
+      end
+      r
+    else
+      let data = read_bytes(num_bytes)?
+
+      _decode_u16(data)?
+    end
+
+  fun _decode_u16(data: (Array[U8] val | Array[Array[U8] val] val)): U16 ? =>
+    match data
+    | let d: Array[U8] val =>
+      d.read_u16(0)?
+    | let d: (Array[Array[U8] val] val) =>
+      _decode_u16_array(d)?
+    end
+
+  fun _decode_u16_array(data: Array[Array[U8] val] val): U16 ? =>
+    var out: U16 = 0
+    let iters = Array[Iterator[U8]]
+    for a in data.values() do
+      iters.push(a.values())
+    end
+    var i: U16 = 0
+    let iter_all = Iter[U8].chain(iters.values())
+    while iter_all.has_next() do
+      ifdef bigendian then
+        out = (out << 8) or iter_all.next()?.u16()
+      else
+        out = out or (iter_all.next()?.u16() << (i * 8))
+        i = i + 1
+      end
+    end
+    out
+
+  fun ref read_u32(): U32 ? =>
+    """
+    Read a U32.
+    """
+    let num_bytes = U32(0).bytewidth()
+    if _available < num_bytes then
+      error
+    end
+    try
+      let node = _chunks.head()?
+      (var data, var offset) = node()?
+      let r = data.read_u32(offset)?
+
+      offset = offset + num_bytes
+      _available = _available - num_bytes
+      if offset < data.size() then
+        node()? = (data, offset)
+      else
+        _chunks.shift()?
+      end
+      r
+    else
+      let data = read_bytes(num_bytes)?
+
+      _decode_u32(data)?
+    end
+
+  fun _decode_u32(data: (Array[U8] val | Array[Array[U8] val] val)): U32 ? =>
+    match data
+    | let d: Array[U8] val =>
+      d.read_u32(0)?
+    | let d: (Array[Array[U8] val] val) =>
+      _decode_u32_array(d)?
+    end
+
+  fun _decode_u32_array(data: Array[Array[U8] val] val): U32 ? =>
+    var out: U32 = 0
+    let iters = Array[Iterator[U8]]
+    for a in data.values() do
+      iters.push(a.values())
+    end
+    let iter_all = Iter[U8].chain(iters.values())
+    var i: U32 = 0
+    while iter_all.has_next() do
+      ifdef bigendian then
+        out = (out << 8) or iter_all.next()?.u32()
+      else
+        out = out or (iter_all.next()?.u32() << (i * 8))
+        i = i + 1
+      end
+    end
+    out
+
+  fun ref read_u64(): U64 ? =>
+    """
+    Read a U64.
+    """
+    let num_bytes = U64(0).bytewidth()
+    if _available < num_bytes then
+      error
+    end
+    try
+      let node = _chunks.head()?
+      (var data, var offset) = node()?
+      let r = data.read_u64(offset)?
+
+      offset = offset + num_bytes
+      _available = _available - num_bytes
+      if offset < data.size() then
+        node()? = (data, offset)
+      else
+        _chunks.shift()?
+      end
+      r
+    else
+      let data = read_bytes(num_bytes)?
+
+      _decode_u64(data)?
+    end
+
+  fun _decode_u64(data: (Array[U8] val | Array[Array[U8] val] val)): U64 ? =>
+    match data
+    | let d: Array[U8] val =>
+      d.read_u64(0)?
+    | let d: (Array[Array[U8] val] val) =>
+      _decode_u64_array(d)?
+    end
+
+  fun _decode_u64_array(data: Array[Array[U8] val] val): U64 ? =>
+    var out: U64 = 0
+    let iters = Array[Iterator[U8]]
+    for a in data.values() do
+      iters.push(a.values())
+    end
+    let iter_all = Iter[U8].chain(iters.values())
+    var i: U64 = 0
+    while iter_all.has_next() do
+      ifdef bigendian then
+        out = (out << 8) or iter_all.next()?.u64()
+      else
+        out = out or (iter_all.next()?.u64() << (i * 8))
+        i = i + 1
+      end
+    end
+    out
+
+  fun ref read_u128(): U128 ? =>
+    """
+    Read a U128.
+    """
+    let num_bytes = U128(0).bytewidth()
+    if _available < num_bytes then
+      error
+    end
+    try
+      let node = _chunks.head()?
+      (var data, var offset) = node()?
+      let r = data.read_u128(offset)?
+
+      offset = offset + num_bytes
+      _available = _available - num_bytes
+      if offset < data.size() then
+        node()? = (data, offset)
+      else
+        _chunks.shift()?
+      end
+      r
+    else
+      let data = read_bytes(num_bytes)?
+
+      _decode_u128(data)?
+    end
+
+  fun _decode_u128(data: (Array[U8] val | Array[Array[U8] val] val)): U128 ? =>
+    match data
+    | let d: Array[U8] val =>
+      d.read_u128(0)?
+    | let d: (Array[Array[U8] val] val) =>
+      _decode_u128_array(d)?
+    end
+
+  fun _decode_u128_array(data: Array[Array[U8] val] val): U128 ? =>
+    var out: U128 = 0
+    let iters = Array[Iterator[U8]]
+    for a in data.values() do
+      iters.push(a.values())
+    end
+    let iter_all = Iter[U8].chain(iters.values())
+    var i: U128 = 0
+    while iter_all.has_next() do
+      ifdef bigendian then
+        out = (out << 8) or iter_all.next()?.u128()
+      else
+        out = out or (iter_all.next()?.u128() << (i * 8))
+        i = i + 1
+      end
+    end
+    out
+
   fun ref read_byte(): U8 ? =>
     """
     Get a single byte.
     """
+    let num_bytes = U8(0).bytewidth()
     let node = _chunks.head()?
     (var data, var offset) = node()?
     let r = data(offset)?
 
-    offset = offset + 1
-    _available = _available - 1
+    offset = offset + num_bytes
+    _available = _available - num_bytes
 
     if offset < data.size() then
       node()? = (data, offset)
@@ -338,11 +555,154 @@ class ValReader is PeekableReader
     node()? = (data, offset)
     error
 
+  fun box peek_u8(offset: USize = 0): U8 ? =>
+    """
+    Get the U8 at the given offset without moving the cursor forward.
+    Raise an error if the given offset is not yet available.
+    """
+    peek_byte(offset)?
+
+  fun box peek_u16(offset: USize = 0): U16 ? =>
+    """
+    Get the U16 at the given offset without moving the cursor forward.
+    Raise an error if the given offset is not yet available.
+    """
+    let num_bytes = U16(0).bytewidth()
+    if _available < (offset + num_bytes) then
+      error
+    end
+    try
+      var offset' = offset
+      var iter = _chunks.nodes()
+
+      while true do
+        let node = iter.next()?
+        (var data, var node_offset) = node()?
+        offset' = offset' + node_offset
+
+        let data_size = data.size()
+        if offset' >= data_size then
+          offset' = offset' - data_size
+        else
+          return data.read_u16(offset')?
+        end
+      end
+
+      error
+    else
+      let data = peek_bytes(num_bytes, offset)?
+
+      _decode_u16(data)?
+    end
+
+  fun box peek_u32(offset: USize = 0): U32 ? =>
+    """
+    Get the U32 at the given offset without moving the cursor forward.
+    Raise an error if the given offset is not yet available.
+    """
+    let num_bytes = U32(0).bytewidth()
+    if _available < (offset + num_bytes) then
+      error
+    end
+    try
+      var offset' = offset
+      var iter = _chunks.nodes()
+
+      while true do
+        let node = iter.next()?
+        (var data, var node_offset) = node()?
+        offset' = offset' + node_offset
+
+        let data_size = data.size()
+        if offset' >= data_size then
+          offset' = offset' - data_size
+        else
+          return data.read_u32(offset')?
+        end
+      end
+
+      error
+    else
+      let data = peek_bytes(num_bytes, offset)?
+
+      _decode_u32(data)?
+    end
+
+  fun box peek_u64(offset: USize = 0): U64 ? =>
+    """
+    Get the U64 at the given offset without moving the cursor forward.
+    Raise an error if the given offset is not yet available.
+    """
+    let num_bytes = U64(0).bytewidth()
+    if _available < (offset + num_bytes) then
+      error
+    end
+    try
+      var offset' = offset
+      var iter = _chunks.nodes()
+
+      while true do
+        let node = iter.next()?
+        (var data, var node_offset) = node()?
+        offset' = offset' + node_offset
+
+        let data_size = data.size()
+        if offset' >= data_size then
+          offset' = offset' - data_size
+        else
+          return data.read_u64(offset')?
+        end
+      end
+
+      error
+    else
+      let data = peek_bytes(num_bytes, offset)?
+
+      _decode_u64(data)?
+    end
+
+  fun box peek_u128(offset: USize = 0): U128 ? =>
+    """
+    Get the U128 at the given offset without moving the cursor forward.
+    Raise an error if the given offset is not yet available.
+    """
+    let num_bytes = U128(0).bytewidth()
+    if _available < (offset + num_bytes) then
+      error
+    end
+    try
+      var offset' = offset
+      var iter = _chunks.nodes()
+
+      while true do
+        let node = iter.next()?
+        (var data, var node_offset) = node()?
+        offset' = offset' + node_offset
+
+        let data_size = data.size()
+        if offset' >= data_size then
+          offset' = offset' - data_size
+        else
+          return data.read_u128(offset')?
+        end
+      end
+
+      error
+    else
+      let data = peek_bytes(num_bytes, offset)?
+
+      _decode_u128(data)?
+    end
+
   fun box peek_byte(offset: USize = 0): U8 ? =>
     """
     Get the byte at the given offset without moving the cursor forward.
     Raise an error if the given offset is not yet available.
     """
+    if _available < (offset + 1) then
+      error
+    end
+
     var offset' = offset
     var iter = _chunks.nodes()
 

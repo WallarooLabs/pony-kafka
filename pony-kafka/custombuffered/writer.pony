@@ -171,26 +171,86 @@ class Writer
     _byte(data15)
     _byte(data16)
 
+  fun ref write_u8(data: U8) =>
+    """
+    Write a U8 to the buffer.
+    """
+    _check(1)
+    _byte(data)
+
+  fun ref write_u16(data: U16) =>
+    """
+    Write a U16 to the buffer.
+    """
+    let num_bytes = U16(0).bytewidth()
+    _check(num_bytes)
+    try
+      _current.update_u16(_offset, data)?
+      _offset = _offset + num_bytes
+      _size = _size + num_bytes
+    end
+
+  fun ref write_u32(data: U32) =>
+    """
+    Write a U32 to the buffer.
+    """
+    let num_bytes = U32(0).bytewidth()
+    _check(num_bytes)
+    try
+      _current.update_u32(_offset, data)?
+      _offset = _offset + num_bytes
+      _size = _size + num_bytes
+    end
+
+  fun ref write_u64(data: U64) =>
+    """
+    Write a U64 to the buffer.
+    """
+    let num_bytes = U64(0).bytewidth()
+    _check(num_bytes)
+    try
+      _current.update_u64(_offset, data)?
+      _offset = _offset + num_bytes
+      _size = _size + num_bytes
+    end
+
+  fun ref write_u128(data: U128) =>
+    """
+    Write a U128 to the buffer.
+    """
+    let num_bytes = U128(0).bytewidth()
+    _check(num_bytes)
+    try
+      _current.update_u128(_offset, data)?
+      _offset = _offset + num_bytes
+      _size = _size + num_bytes
+    end
+
   // TODO: Ability to overwrite at a previous position (only if that position
   // used to be part of one of our accumulation iso's)
-  // TODO: Copy small sized ByteSeq instead to minimize multiple small arrays
-  // for IO calls
   fun ref write(data: ByteSeq) =>
     """
     Write a ByteSeq to the buffer.
     """
-    _append_current()
-    _chunks.push(data)
-    _size = _size + data.size()
+    if data.size() <= 64 then
+      match data
+      | let d: String => let a = d.array(); _current.copy_from(a, 0, _offset, a.size())
+      | let d: Array[U8] val => _current.copy_from(d, 0, _offset, d.size())
+      end
+      _offset = _offset + data.size()
+      _size = _size + data.size()
+    else
+      _append_current()
+      _chunks.push(data)
+      _size = _size + data.size()
+    end
 
   fun ref writev(data: ByteSeqIter) =>
     """
     Write ByteSeqs to the buffer.
     """
-    _append_current()
     for chunk in data.values() do
-      _chunks.push(chunk)
-      _size = _size + chunk.size()
+      write(chunk)
     end
 
   fun ref done(): Array[ByteSeq] iso^ =>
