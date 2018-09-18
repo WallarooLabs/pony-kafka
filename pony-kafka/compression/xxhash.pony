@@ -36,6 +36,7 @@ primitive XXHash
     var size: USize = buffer.size().min(num_bytes)
     var last: USize = size + offset
 
+    // process 16 byte chunks
     if size > 16 then
       let limit = last - 16
       var v1: U32 = seed + prime32_1() + prime32_2()
@@ -62,12 +63,14 @@ primitive XXHash
 
     h32 = h32 + size.u32()
 
+    // process 4 byte chunks
     while (offset + 4) <= last do
       h32 = h32 + (read32(buffer, offset)? * prime32_3())
       h32 = rotl32(h32, 17) * prime32_4()
       offset = offset + 4
     end
 
+    // process remaining bytes
     while offset < last do
       h32 = h32 + (buffer(offset)?.u32() * prime32_5())
       h32 = rotl32(h32, 11) * prime32_1()
@@ -83,10 +86,11 @@ primitive XXHash
     h32
 
   fun read32(buffer: Array[U8] box, offset: USize): U32 ? =>
-    // TODO: figure out some way of detecting endianness; big endian needs byte
-    // swapping
-    (buffer(offset + 3)?.u32() << 24) or (buffer(offset + 2)?.u32() << 16) or
-    (buffer(offset + 1)?.u32() << 8) or buffer(offset + 0)?.u32()
+    ifdef bigendian then
+      buffer.read_u32(offset)?.bswap()
+    else
+      buffer.read_u32(offset)?
+    end
 
   fun round32(seed: U32, value: U32): U32 =>
     var x = seed + (value * prime32_2())

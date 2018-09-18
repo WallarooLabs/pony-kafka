@@ -44,6 +44,8 @@ class iso _TestXXHash is UnitTest
     h.assert_eq[U32](0xd6bf8459, XXHash.hash32(Array[U8], 0x42c91977)?)
     h.assert_eq[U32](0x02cc5d05, XXHash.hash32(d, 0, 4, 0)?)
     h.assert_eq[U32](0xe0fe705f, XXHash.hash32(d, 0, 4, 1)?)
+
+    // this one tests not using buffer U32
     h.assert_eq[U32](0x9e5e7e93, XXHash.hash32(d, 0, 5, 14)?)
 
 class iso _TestZlib is UnitTest

@@ -57,10 +57,13 @@ primitive SnappyDecompressor
 
 primitive Snappy
   fun read32be(buffer: ByteSeq, offset: USize): U32 ? =>
-    // TODO: figure out some way of detecting endianness; big endian needs byte
-    // swapping
-    (buffer(offset + 0)?.u32() << 24) or (buffer(offset + 1)?.u32() << 16) or
-    (buffer(offset + 2)?.u32() << 8) or buffer(offset + 3)?.u32()
+    ifdef bigendian then
+      (buffer(offset + 3)?.u32() << 24) or (buffer(offset + 2)?.u32() << 16) or
+      (buffer(offset + 1)?.u32() << 8) or buffer(offset + 0)?.u32()
+    else
+      (buffer(offset + 0)?.u32() << 24) or (buffer(offset + 1)?.u32() << 16) or
+      (buffer(offset + 2)?.u32() << 8) or buffer(offset + 3)?.u32()
+    end
 
   fun decompress_java(logger: Logger[String], data: ByteSeq): Array[U8] iso^ ? =>
     let snappy_java_hdr_size: USize = 16
