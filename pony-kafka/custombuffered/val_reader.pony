@@ -30,7 +30,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use "collections"
 use "itertools"
 
-class ValReader is PeekableReader
+class ValReader is (PeekableReader & RewindableReader)
   """
   Store network data and provide a parsing interface.
 
@@ -91,10 +91,14 @@ class ValReader is PeekableReader
       env.input(recover Notify(env) end, 1024)
   ```
   """
-  embed _chunks: List[(Array[U8] val, USize)] = _chunks.create()
+  embed _chunks: List[Array[U8] val] = _chunks.create()
   var _available: USize = 0
-  var _search_node: (ListNode[(Array[U8] val, USize)] | None) = None
+  var _search_node: (ListNode[Array[U8] val] | None) = None
   var _search_len: USize = 0
+  var _total_size: USize = 0
+  var _current_position: USize = 0
+  var _current_node: (ListNode[Array[U8] val] | None) = None
+  var _current_node_offset: USize = 0
 
   fun size(): USize =>
     """
@@ -108,6 +112,51 @@ class ValReader is PeekableReader
     """
     _chunks.clear()
     _available = 0
+    _current_position = 0
+    _current_node_offset = 0
+    _search_node = None
+    _current_node = None
+
+  fun ref set_position(pos: USize) ? =>
+    """
+    Set new abosolute position in rewindable buffer.
+    """
+    if pos <= _total_size then
+      _current_position = 0
+      _current_node_offset = 0
+      _available = _total_size
+      _search_node = None
+      _current_node = _chunks.head()?
+      skip(pos)?
+    else
+      error
+    end
+
+  fun current_position(): USize =>
+    """
+    Current position in rewindable buffer.
+    """
+    _current_position
+
+  fun total_size(): USize =>
+    """
+    Total size of rewindable buffer.
+    """
+    _total_size
+
+  fun ref _increment_position(num_bytes: USize) =>
+    """
+    Manage available bytes/current position
+    """
+    _available = _available - num_bytes
+    _current_position = _current_position + num_bytes
+
+  fun ref _switch_node(node: ListNode[Array[U8] val]) =>
+    """
+    Switch to the next node and update current node offset
+    """
+    _current_node = node.next()
+    _current_node_offset = 0
 
   fun ref _append(data: ByteSeq) =>
     """
@@ -120,7 +169,15 @@ class ValReader is PeekableReader
       end
 
     _available = _available + data_array.size()
-    _chunks.push((data_array, 0))
+    _total_size = _total_size + data_array.size()
+    _chunks.push(data_array)
+
+    if _current_node is None then
+      try
+        // guaranteed not to fail since we just added a node
+        _current_node = _chunks.tail()?
+      end
+    end
 
   fun ref append(data: (ByteSeq | Array[ByteSeq] val)) =>
     """
@@ -139,23 +196,23 @@ class ValReader is PeekableReader
     Skip n bytes.
     """
     if _available >= n then
-      _available = _available - n
+      _increment_position(n)
+
       var rem = n
 
       while rem > 0 do
-        let node = _chunks.head()?
-        (var data, var offset) = node()?
-        let avail = data.size() - offset
+        let node = _current_node as ListNode[Array[U8] val]
+        var data = node()?
+        let avail = data.size() - _current_node_offset
 
         if avail > rem then
-          node()? = (data, offset + rem)
+          _current_node_offset = _current_node_offset + rem
           break
         end
 
         rem = rem - avail
-        _chunks.shift()?
+        _switch_node(node)
       end
-
     else
       error
     end
@@ -201,27 +258,27 @@ class ValReader is PeekableReader
     """
     let len = _search_length()?
 
-    _available = _available - len
+    _increment_position(len)
     var out = recover String(len) end
     var i = USize(0)
 
     while i < len do
-      let node = _chunks.head()?
-      (let data, let offset) = node()?
+      let node = _current_node as ListNode[Array[U8] val]
+      let data = node()?
 
-      let avail = data.size() - offset
+      let avail = data.size() - _current_node_offset
       let need = len - i
       let copy_len = need.min(avail)
 
-      out.append(data, offset, copy_len)
+      out.append(data, _current_node_offset, copy_len)
 
       if avail > need then
-        node()? = (data, offset + need)
+        _current_node_offset = _current_node_offset + need
         break
       end
 
       i = i + copy_len
-      _chunks.shift()?
+      _switch_node(node)
     end
 
     out.truncate(len -
@@ -244,16 +301,14 @@ class ValReader is PeekableReader
       error
     end
     try
-      let node = _chunks.head()?
-      (var data, var offset) = node()?
-      let r = data.read_u16(offset)?
+      let node = _current_node as ListNode[Array[U8] val]
+      var data = node()?
+      let r = data.read_u16(_current_node_offset)?
 
-      offset = offset + num_bytes
-      _available = _available - num_bytes
-      if offset < data.size() then
-        node()? = (data, offset)
-      else
-        _chunks.shift()?
+      _current_node_offset = _current_node_offset + num_bytes
+      _increment_position(num_bytes)
+      if _current_node_offset >= data.size() then
+        _switch_node(node)
       end
       r
     else
@@ -297,16 +352,14 @@ class ValReader is PeekableReader
       error
     end
     try
-      let node = _chunks.head()?
-      (var data, var offset) = node()?
-      let r = data.read_u32(offset)?
+      let node = _current_node as ListNode[Array[U8] val]
+      var data = node()?
+      let r = data.read_u32(_current_node_offset)?
 
-      offset = offset + num_bytes
-      _available = _available - num_bytes
-      if offset < data.size() then
-        node()? = (data, offset)
-      else
-        _chunks.shift()?
+      _current_node_offset = _current_node_offset + num_bytes
+      _increment_position(num_bytes)
+      if _current_node_offset >= data.size() then
+        _switch_node(node)
       end
       r
     else
@@ -350,16 +403,14 @@ class ValReader is PeekableReader
       error
     end
     try
-      let node = _chunks.head()?
-      (var data, var offset) = node()?
-      let r = data.read_u64(offset)?
+      let node = _current_node as ListNode[Array[U8] val]
+      var data = node()?
+      let r = data.read_u64(_current_node_offset)?
 
-      offset = offset + num_bytes
-      _available = _available - num_bytes
-      if offset < data.size() then
-        node()? = (data, offset)
-      else
-        _chunks.shift()?
+      _current_node_offset = _current_node_offset + num_bytes
+      _increment_position(num_bytes)
+      if _current_node_offset >= data.size() then
+        _switch_node(node)
       end
       r
     else
@@ -403,16 +454,14 @@ class ValReader is PeekableReader
       error
     end
     try
-      let node = _chunks.head()?
-      (var data, var offset) = node()?
-      let r = data.read_u128(offset)?
+      let node = _current_node as ListNode[Array[U8] val]
+      var data = node()?
+      let r = data.read_u128(_current_node_offset)?
 
-      offset = offset + num_bytes
-      _available = _available - num_bytes
-      if offset < data.size() then
-        node()? = (data, offset)
-      else
-        _chunks.shift()?
+      _current_node_offset = _current_node_offset + num_bytes
+      _increment_position(num_bytes)
+      if _current_node_offset >= data.size() then
+        _switch_node(node)
       end
       r
     else
@@ -452,17 +501,15 @@ class ValReader is PeekableReader
     Get a single byte.
     """
     let num_bytes = U8(0).bytewidth()
-    let node = _chunks.head()?
-    (var data, var offset) = node()?
-    let r = data(offset)?
+    let node = _current_node as ListNode[Array[U8] val]
+    var data = node()?
+    let r = data(_current_node_offset)?
 
-    offset = offset + num_bytes
-    _available = _available - num_bytes
+    _current_node_offset = _current_node_offset + num_bytes
+    _increment_position(num_bytes)
 
-    if offset < data.size() then
-      node()? = (data, offset)
-    else
-      _chunks.shift()?
+    if _current_node_offset >= data.size() then
+      _switch_node(node)
     end
     r
 
@@ -483,22 +530,22 @@ class ValReader is PeekableReader
       error
     end
 
-    _available = _available - len
+    _increment_position(len)
     var out = recover Array[Array[U8] val] end
     var i = USize(0)
 
     while i < len do
-      let node = _chunks.head()?
-      (let data, let offset) = node()?
+      let node = _current_node as ListNode[Array[U8] val]
+      let data = node()?
 
-      let avail = data.size() - offset
+      let avail = data.size() - _current_node_offset
       let need = len - i
       let copy_len = need.min(avail)
 
-      let next_segment = data.trim(offset, offset + copy_len)
+      let next_segment = data.trim(_current_node_offset, _current_node_offset + copy_len)
 
       if avail > need then
-        node()? = (data, offset + need)
+        _current_node_offset = _current_node_offset + need
         if out.size() == 0 then
           return (copy_len, next_segment)
         else
@@ -510,24 +557,16 @@ class ValReader is PeekableReader
       end
 
       i = i + copy_len
-      _chunks.shift()?
+      _switch_node(node)
     end
 
     (i, consume out)
 
-  // TODO: Add rewind ability
-  // TODO: Add get position
-  // TODO: Add peek_contiguous_bytes function
   fun ref read_contiguous_bytes(len: USize): Array[U8] val ? =>
     """
     Return a block as a contiguous chunk of memory without copying if possible
-    or throw an error.
+    or copy together multiple chunks if required.
     """
-    // TODO: enhance to fall back to a copy if have non-contiguous data and
-    // return an iso? Not possible because iso/val distinction doesn't exist at
-    // runtime? Maybe need to enhance callers to be able to work with
-    // non-contiguous memory?
-
     if len == 0 then
       return recover Array[U8] end
     end
@@ -536,23 +575,26 @@ class ValReader is PeekableReader
       error
     end
 
-    var out = recover Array[Array[U8] val] end
+    let node = _current_node as ListNode[Array[U8] val]
+    let data = node()?
 
-    let node = _chunks.head()?
-    (let data, let offset) = node()?
-
-    let avail = data.size() - offset
+    let avail = data.size() - _current_node_offset
     let need = len
     let copy_len = need.min(avail)
 
+    if avail < len then
+      return block(len)?
+    end
+
+    var out = recover Array[Array[U8] val] end
+
     if avail >= need then
-      let next_segment = data.trim(offset, offset + copy_len)
-      node()? = (data, offset + need)
-      _available = _available - len
+      let next_segment = data.trim(_current_node_offset, _current_node_offset + copy_len)
+      _current_node_offset = _current_node_offset + need
+      _increment_position(len)
       return next_segment
     end
 
-    node()? = (data, offset)
     error
 
   fun box peek_u8(offset: USize = 0): U8 ? =>
@@ -572,17 +614,16 @@ class ValReader is PeekableReader
       error
     end
     try
-      var offset' = offset
-      var iter = _chunks.nodes()
+      var offset' = offset + _current_node_offset
+      var node = _current_node as ListNode[Array[U8] val] box
 
       while true do
-        let node = iter.next()?
-        (var data, var node_offset) = node()?
-        offset' = offset' + node_offset
+        var data = node()?
 
         let data_size = data.size()
         if offset' >= data_size then
           offset' = offset' - data_size
+          node = node.next() as ListNode[Array[U8] val] box
         else
           return data.read_u16(offset')?
         end
@@ -605,17 +646,16 @@ class ValReader is PeekableReader
       error
     end
     try
-      var offset' = offset
-      var iter = _chunks.nodes()
+      var offset' = offset + _current_node_offset
+      var node = _current_node as ListNode[Array[U8] val] box
 
       while true do
-        let node = iter.next()?
-        (var data, var node_offset) = node()?
-        offset' = offset' + node_offset
+        var data = node()?
 
         let data_size = data.size()
         if offset' >= data_size then
           offset' = offset' - data_size
+          node = node.next() as ListNode[Array[U8] val] box
         else
           return data.read_u32(offset')?
         end
@@ -638,17 +678,16 @@ class ValReader is PeekableReader
       error
     end
     try
-      var offset' = offset
-      var iter = _chunks.nodes()
+      var offset' = offset + _current_node_offset
+      var node = _current_node as ListNode[Array[U8] val] box
 
       while true do
-        let node = iter.next()?
-        (var data, var node_offset) = node()?
-        offset' = offset' + node_offset
+        var data = node()?
 
         let data_size = data.size()
         if offset' >= data_size then
           offset' = offset' - data_size
+          node = node.next() as ListNode[Array[U8] val] box
         else
           return data.read_u64(offset')?
         end
@@ -671,17 +710,16 @@ class ValReader is PeekableReader
       error
     end
     try
-      var offset' = offset
-      var iter = _chunks.nodes()
+      var offset' = offset + _current_node_offset
+      var node = _current_node as ListNode[Array[U8] val] box
 
       while true do
-        let node = iter.next()?
-        (var data, var node_offset) = node()?
-        offset' = offset' + node_offset
+        var data = node()?
 
         let data_size = data.size()
         if offset' >= data_size then
           offset' = offset' - data_size
+          node = node.next() as ListNode[Array[U8] val] box
         else
           return data.read_u128(offset')?
         end
@@ -703,17 +741,16 @@ class ValReader is PeekableReader
       error
     end
 
-    var offset' = offset
-    var iter = _chunks.nodes()
+    var offset' = offset + _current_node_offset
+    var node = _current_node as ListNode[Array[U8] val] box
 
     while true do
-      let node = iter.next()?
-      (var data, var node_offset) = node()?
-      offset' = offset' + node_offset
+      var data = node()?
 
       let data_size = data.size()
       if offset' >= data_size then
         offset' = offset' - data_size
+        node = node.next() as ListNode[Array[U8] val] box
       else
         return data(offset')?
       end
@@ -732,13 +769,11 @@ class ValReader is PeekableReader
       error
     end
 
-    var offset' = offset
-    var iter = _chunks.nodes()
+    var offset' = offset + _current_node_offset
+    var node = _current_node as ListNode[Array[U8] val] box
 
     while true do
-      let node = iter.next()?
-      (var data, var node_offset) = node()?
-      offset' = offset' + node_offset
+      var data = node()?
 
       let data_size = data.size()
       if offset' >= data_size then
@@ -755,14 +790,14 @@ class ValReader is PeekableReader
         out.push(data.trim(offset'))
 
         while i < len do
-          let node' = iter.next()?
-          (let data', let offset'') = node'()?
+          node = node.next() as ListNode[Array[U8] val] box
+          let data' = node()?
 
-          let avail = data'.size() - offset''
+          let avail = data'.size()
           let need = len - i
           let copy_len = need.min(avail)
 
-          let next_segment = data'.trim(offset'', offset'' + copy_len)
+          let next_segment = data'.trim(0, copy_len)
 
           if avail > need then
             if out.size() == 0 then
@@ -785,6 +820,55 @@ class ValReader is PeekableReader
 
     error
 
+  fun box peek_contiguous_bytes(len: USize, offset: USize = 0): Array[U8] val ? =>
+    """
+    Return a block as a contiguous chunk of memory without copying if possible
+    or copy together multiple chunks if required.
+    """
+    if _available < (offset + len) then
+      error
+    end
+
+    var offset' = offset + _current_node_offset
+    var node = _current_node as ListNode[Array[U8] val] box
+
+    while true do
+      var data = node()?
+
+      let data_size = data.size()
+      if offset' >= data_size then
+        offset' = offset' - data_size
+      else
+        if (data_size - offset') > len then
+          return data.trim(offset', offset' + len)
+        end
+
+        let data' = peek_bytes(len, offset)?
+
+        match data'
+        | let a: Array[U8] val =>
+          return a
+        | let arr: Array[Array[U8] val] val =>
+          var out = recover Array[U8].>undefined(len) end
+          var i: USize = 0
+          for a in arr.values() do
+            out = recover
+              let r = consume ref out
+              a.copy_to(r, 0, i, a.size())
+              i = i + a.size()
+              consume r
+            end
+          end
+          return out
+        end
+
+      end
+
+      node = node.next() as ListNode[Array[U8] val] box
+    end
+
+    error
+
   fun ref _distance_of(byte: U8): USize ? =>
     """
     Get the distance to the first occurence of the given byte
@@ -793,35 +877,36 @@ class ValReader is PeekableReader
       error
     end
 
-    var node = if _search_len > 0 then
-      let prev = _search_node as ListNode[(Array[U8] val, USize)]
+    (var node, var offset') = if _search_len > 0 then
+      let prev = _search_node as ListNode[Array[U8] val]
 
       if not prev.has_next() then
         error
       end
 
-      prev.next() as ListNode[(Array[U8] val, USize)]
+      (prev.next() as ListNode[Array[U8] val], 0)
     else
-      _chunks.head()?
+      (_current_node as ListNode[Array[U8] val], _current_node_offset)
     end
 
     while true do
-      (var data, var offset) = node()?
+      var data = node()?
 
       try
-        let len = (_search_len + data.find(byte, offset)? + 1) - offset
+        let len = (_search_len + data.find(byte, offset')? + 1) - offset'
         _search_node = None
         _search_len = 0
         return len
       end
 
-      _search_len = _search_len + (data.size() - offset)
+      _search_len = _search_len + (data.size() - offset')
 
       if not node.has_next() then
         break
       end
 
-      node = node.next() as ListNode[(Array[U8] val, USize)]
+      node = node.next() as ListNode[Array[U8] val]
+      offset' = 0
     end
 
     _search_node = node

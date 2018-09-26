@@ -84,14 +84,7 @@ class Writer
   """
   var _chunks: Array[ByteSeq] iso = recover Array[ByteSeq] end
   var _current: Array[U8] iso = recover Array[U8] end
-  var _offset: USize = 0
   var _size: USize = 0
-
-  fun ref reserve_current(size': USize) =>
-    """
-    Reserve space for size bytes in `_current`.
-    """
-    _check(size')
 
   fun ref reserve_chunks(size': USize) =>
     """
@@ -102,129 +95,54 @@ class Writer
     """
     _chunks.reserve(size')
 
+  fun ref reserve_current(size': USize) =>
+    """
+    Reserve space for size bytes in `_current`.
+    """
+    _current.reserve(_current.size() + size')
+
   fun size(): USize =>
     _size
-
-  fun ref write_byte(data: U8) =>
-    """
-    Write a byte to the buffer.
-    """
-    _check(1)
-    _byte(data)
-
-  fun ref write_two_bytes(data: U8, data2: U8) =>
-    """
-    Write a byte to the buffer.
-    """
-    _check(2)
-    _byte(data)
-    _byte(data2)
-
-  fun ref write_four_bytes(data: U8, data2: U8, data3: U8, data4: U8)
-  =>
-    """
-    Write a byte to the buffer.
-    """
-    _check(4)
-    _byte(data)
-    _byte(data2)
-    _byte(data3)
-    _byte(data4)
-
-  fun ref write_eight_bytes(data: U8, data2: U8, data3: U8, data4: U8
-  , data5: U8, data6: U8, data7: U8, data8: U8) =>
-    """
-    Write a byte to the buffer.
-    """
-    _check(8)
-    _byte(data)
-    _byte(data2)
-    _byte(data3)
-    _byte(data4)
-    _byte(data5)
-    _byte(data6)
-    _byte(data7)
-    _byte(data8)
-
-  fun ref write_sixteen_bytes(data: U8, data2: U8, data3: U8, data4: U8
-  , data5: U8, data6: U8, data7: U8, data8: U8
-  , data9: U8, data10: U8, data11: U8, data12: U8
-  , data13: U8, data14: U8, data15: U8, data16: U8) =>
-    """
-    Write a byte to the buffer.
-    """
-    _check(16)
-    _byte(data)
-    _byte(data2)
-    _byte(data3)
-    _byte(data4)
-    _byte(data5)
-    _byte(data6)
-    _byte(data7)
-    _byte(data8)
-    _byte(data9)
-    _byte(data10)
-    _byte(data11)
-    _byte(data12)
-    _byte(data13)
-    _byte(data14)
-    _byte(data15)
-    _byte(data16)
 
   fun ref write_u8(data: U8) =>
     """
     Write a U8 to the buffer.
     """
-    _check(1)
-    _byte(data)
+    let num_bytes = U8(0).bytewidth()
+    _current.push_u8(data)
+    _size = _size + num_bytes
 
   fun ref write_u16(data: U16) =>
     """
     Write a U16 to the buffer.
     """
     let num_bytes = U16(0).bytewidth()
-    _check(num_bytes)
-    try
-      _current.update_u16(_offset, data)?
-      _offset = _offset + num_bytes
-      _size = _size + num_bytes
-    end
+    _current.push_u16(data)
+    _size = _size + num_bytes
 
   fun ref write_u32(data: U32) =>
     """
     Write a U32 to the buffer.
     """
     let num_bytes = U32(0).bytewidth()
-    _check(num_bytes)
-    try
-      _current.update_u32(_offset, data)?
-      _offset = _offset + num_bytes
-      _size = _size + num_bytes
-    end
+    _current.push_u32(data)
+    _size = _size + num_bytes
 
   fun ref write_u64(data: U64) =>
     """
     Write a U64 to the buffer.
     """
     let num_bytes = U64(0).bytewidth()
-    _check(num_bytes)
-    try
-      _current.update_u64(_offset, data)?
-      _offset = _offset + num_bytes
-      _size = _size + num_bytes
-    end
+    _current.push_u64(data)
+    _size = _size + num_bytes
 
   fun ref write_u128(data: U128) =>
     """
     Write a U128 to the buffer.
     """
     let num_bytes = U128(0).bytewidth()
-    _check(num_bytes)
-    try
-      _current.update_u128(_offset, data)?
-      _offset = _offset + num_bytes
-      _size = _size + num_bytes
-    end
+    _current.push_u128(data)
+    _size = _size + num_bytes
 
   // TODO: Ability to overwrite at a previous position (only if that position
   // used to be part of one of our accumulation iso's)
@@ -232,12 +150,15 @@ class Writer
     """
     Write a ByteSeq to the buffer.
     """
+    // if `data` is 1 cacheline or less in size
+    // copy it into the existing `_current` array
+    // to coalesce multiple tiny arrays
+    // into a single bigger array
     if data.size() <= 64 then
       match data
-      | let d: String => let a = d.array(); _current.copy_from(a, 0, _offset, a.size())
-      | let d: Array[U8] val => _current.copy_from(d, 0, _offset, d.size())
+      | let d: String => let a = d.array(); _current.copy_from(a, 0, _current.size(), a.size())
+      | let d: Array[U8] val => _current.copy_from(d, 0, _current.size(), d.size())
       end
-      _offset = _offset + data.size()
       _size = _size + data.size()
     else
       _append_current()
@@ -262,20 +183,6 @@ class Writer
     _chunks = recover Array[ByteSeq] end
 
   fun ref _append_current() =>
-    if _offset > 0 then
-      _current.truncate(_offset)
-      _offset = 0
+    if _current.size() > 0 then
       _chunks.push(_current = recover Array[U8] end)
-    end
-
-  fun ref _check(size': USize) =>
-    if (_current.size() - _offset) < size' then
-      _current.undefined(_offset + size')
-    end
-
-  fun ref _byte(data: U8) =>
-    try
-      _current(_offset)? = data
-      _offset = _offset + 1
-      _size = _size + 1
     end

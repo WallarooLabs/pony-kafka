@@ -177,15 +177,24 @@ class iso _TestValReader is UnitTest
     h.assert_eq[U128](LittleEndianDecoder.u128(b)?,
       0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
 
+    h.assert_eq[USize](b.current_position(), 61)
     h.assert_eq[String](b.line()?, "hi")
+    h.assert_eq[USize](b.current_position(), 64)
     h.assert_eq[String](b.line()?, "there")
+    h.assert_eq[USize](b.current_position(), 71)
+    h.assert_eq[USize](b.total_size(), 71)
+    h.assert_eq[USize](b.size(), 0)
 
     b.append(recover [as U8: 'h'; 'i'] end)
 
+    h.assert_eq[USize](b.current_position(), 71)
+    h.assert_eq[USize](b.total_size(), 73)
+    h.assert_eq[USize](b.size(), 2)
     try
-      b.line()?
+      h.assert_eq[String](b.line()?, "")
       h.fail("shouldn't have a line")
     end
+    h.assert_eq[USize](b.current_position(), 71)
 
     b.append(recover [as U8: '!'; '\n'] end)
     h.assert_eq[String](b.line()?, "hi!")
@@ -206,6 +215,65 @@ class iso _TestValReader is UnitTest
 
     b.append(recover [as U8: 0] end)
     b.append(recover [as U8: 172; 2] end)
+
+
+    h.assert_eq[U8](VarIntDecoder.u8(b)?, 0)
+    h.assert_eq[U32](VarIntDecoder.u32(b)?, 300)
+
+    // the last byte is consumed by the reader
+    h.assert_eq[USize](b.size(), 0)
+
+    // rewind to beginning of buffer
+    b.set_position(0)?
+
+    // These expectations peek into the buffer without consuming bytes.
+    h.assert_eq[U8](LittleEndianDecoder.peek_u8(b)?, 0x42)
+    h.assert_eq[U16](BigEndianDecoder.peek_u16(b, 1)?, 0xDEAD)
+    h.assert_eq[U16](LittleEndianDecoder.peek_u16(b, 3)?, 0xDEAD)
+    h.assert_eq[U32](BigEndianDecoder.peek_u32(b, 5)?, 0xDEADBEEF)
+    h.assert_eq[U32](LittleEndianDecoder.peek_u32(b, 9)?, 0xDEADBEEF)
+    h.assert_eq[U64](BigEndianDecoder.peek_u64(b, 13)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U64](LittleEndianDecoder.peek_u64(b, 21)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U128](BigEndianDecoder.peek_u128(b, 29)?,
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+    h.assert_eq[U128](LittleEndianDecoder.peek_u128(b, 45)?,
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+
+    h.assert_eq[U8](LittleEndianDecoder.peek_u8(b, 61)?, 'h')
+    h.assert_eq[U8](LittleEndianDecoder.peek_u8(b, 62)?, 'i')
+
+    // These expectations consume bytes from the head of the buffer.
+    h.assert_eq[U8](LittleEndianDecoder.u8(b)?, 0x42)
+    h.assert_eq[U16](BigEndianDecoder.u16(b)?, 0xDEAD)
+    h.assert_eq[U16](LittleEndianDecoder.u16(b)?, 0xDEAD)
+    h.assert_eq[U32](BigEndianDecoder.u32(b)?, 0xDEADBEEF)
+    h.assert_eq[U32](LittleEndianDecoder.u32(b)?, 0xDEADBEEF)
+    h.assert_eq[U64](BigEndianDecoder.u64(b)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U64](LittleEndianDecoder.u64(b)?, 0xDEADBEEFFEEDFACE)
+    h.assert_eq[U128](BigEndianDecoder.u128(b)?,
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+    h.assert_eq[U128](LittleEndianDecoder.u128(b)?,
+      0xDEADBEEFFEEDFACEDEADBEEFFEEDFACE)
+
+    h.assert_eq[USize](b.current_position(), 61)
+    h.assert_eq[String](b.line()?, "hi")
+    h.assert_eq[USize](b.current_position(), 64)
+    h.assert_eq[String](String.from_array(b.read_contiguous_bytes(7)?), "there\r\n")
+    h.assert_eq[USize](b.current_position(), 71)
+    h.assert_eq[USize](b.total_size(), 98)
+    h.assert_eq[USize](b.size(), 27)
+
+    h.assert_eq[USize](b.current_position(), 71)
+    h.assert_eq[USize](b.total_size(), 98)
+    h.assert_eq[USize](b.size(), 27)
+    h.assert_eq[String](b.line()?, "hi!")
+
+    h.assert_eq[String](String.from_array(b.read_until(0)?), "str1")
+    h.assert_eq[String](String.from_array(b.peek_contiguous_bytes(10)?), "field1;fie")
+    h.assert_eq[String](String.from_array(b.read_until(';')?), "field1")
+    h.assert_eq[String](String.from_array(b.read_until(';')?), "field2")
+    // read an empty field
+    h.assert_eq[String](String.from_array(b.read_until(';')?), "")
 
 
     h.assert_eq[U8](VarIntDecoder.u8(b)?, 0)

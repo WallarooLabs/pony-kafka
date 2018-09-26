@@ -369,11 +369,22 @@ class IsoReader is Reader
       error
     end
 
-    // TODO: rewrite to avoid allocation of out array if all data if in first
-    // chunk
     _available = _available - len
+    var data' = _chunks.shift()?
+
+    if data'.size() >= len then
+      (let segment, data') = (consume data').chop(len)
+
+      if data'.size() > 0 then
+        _chunks.unshift(consume data')
+      end
+
+      return (len, consume segment)
+    end
+
     var out = recover Array[Array[U8] iso] end
-    var i = USize(0)
+    var i = data'.size()
+    out.push(consume data')
 
     while i < len do
       var data = _chunks.shift()?
@@ -383,19 +394,14 @@ class IsoReader is Reader
 
       (let next_segment, data) = (consume data).chop(need)
 
+      out.push(consume next_segment)
+
       if avail >= need then
         if data.size() > 0 then
           _chunks.unshift(consume data)
         end
 
-        if out.size() == 0 then
-          return (copy_len, consume next_segment)
-        else
-          out.push(consume next_segment)
-          break
-        end
-      else
-        out.push(consume next_segment)
+        break
       end
 
       i = i + copy_len
@@ -406,7 +412,7 @@ class IsoReader is Reader
   fun ref read_contiguous_bytes(len: USize): Array[U8] iso^ ? =>
     """
     Return a block as a contiguous chunk of memory without copying if possible
-    or throw an error.
+    or copy together multiple chunks if required.
     """
     if len == 0 then
       return recover Array[U8] end

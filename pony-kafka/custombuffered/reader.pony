@@ -23,6 +23,6 @@ trait PeekableReader is Reader
     (Array[U8] val | Array[Array[U8] val] val) ?
 
 trait RewindableReader is Reader
-  fun ref set_position(n: USize) ?
+  fun ref set_position(pos: USize) ?
   fun current_position(): USize
   fun total_size(): USize

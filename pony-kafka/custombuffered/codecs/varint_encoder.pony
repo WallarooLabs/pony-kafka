@@ -91,7 +91,7 @@ primitive VarIntEncoder
   fun _encode_varint(wb: Writer, data: U64) =>
     var d = data
     repeat
-      wb.write_byte((d.u8() and 0x7f) or (if (d > 0x7f) then 0x80 else 0 end))
+      wb.write_u8((d.u8() and 0x7f) or (if (d > 0x7f) then 0x80 else 0 end))
       d = d >> 7
     until (d == 0) end
 
