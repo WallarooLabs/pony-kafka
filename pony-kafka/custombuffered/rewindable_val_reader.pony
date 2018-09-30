@@ -30,7 +30,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use "collections"
 use "itertools"
 
-class ValReader is PeekableReader
+class RewindableValReader is RewindableReader
   """
   Store network data and provide a parsing interface.
 
@@ -114,6 +114,32 @@ class ValReader is PeekableReader
     _current_position = 0
     _current_node_offset = 0
     _current_node = None
+
+  fun ref set_position(pos: USize) ? =>
+    """
+    Set new abosolute position in rewindable buffer.
+    """
+    if pos <= _total_size then
+      _current_position = 0
+      _current_node_offset = 0
+      _available = _total_size
+      _current_node = _chunks.head()?
+      skip(pos)?
+    else
+      error
+    end
+
+  fun current_position(): USize =>
+    """
+    Current position in rewindable buffer.
+    """
+    _current_position
+
+  fun total_size(): USize =>
+    """
+    Total size of rewindable buffer.
+    """
+    _total_size
 
   fun ref _increment_position(num_bytes: USize) =>
     """

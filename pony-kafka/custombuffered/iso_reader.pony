@@ -84,6 +84,25 @@ class IsoReader is Reader
       end
     end
 
+  fun ref append_iso(data: (ByteSeq iso | Array[ByteSeq iso] iso)) =>
+    append(consume data)
+
+  fun ref append_val(data: (ByteSeq | Array[ByteSeq] val)) =>
+    match data
+    | let data': ByteSeq =>
+      match data'
+      | let d': Array[U8] val => d'.clone()
+      | let d': String val => d'.array().clone()
+      end
+    | let data': Array[ByteSeq] val =>
+      for d in data'.values() do
+        match d
+        | let d': Array[U8] val => d'.clone()
+        | let d': String val => d'.array().clone()
+        end
+      end
+    end
+
   fun ref skip(n: USize) ? =>
     """
     Skip n bytes.
@@ -100,6 +119,7 @@ class IsoReader is Reader
           break
         end
 
+        _chunks.shift()?
         rem = rem - avail
       end
 
@@ -135,6 +155,39 @@ class IsoReader is Reader
       out
     end
 
+  fun ref read_until(separator: U8): Array[U8] iso^ ? =>
+    """
+    Find the first occurrence of the separator and return the block of bytes
+    before its position. The separator is not included in the returned array,
+    but it is removed from the buffer. To read a line of text, prefer line()
+    that handles \n and \r\n.
+    """
+    let b = block(_distance_of(separator)? - 1)?
+    read_u8()?
+    consume b
+
+  fun ref line(keep_line_breaks: Bool = false): String iso^ ? =>
+    """
+    Return a \n or \r\n terminated line as a string. By default the newline is not
+    included in the returned string, but it is removed from the buffer.
+    Set `keep_line_breaks` to `true` to keep the line breaks in the returned line.
+    """
+    let len = _search_length()?
+
+    let out = block(len)?
+
+    let trunc_len: USize =
+      if keep_line_breaks then
+        0
+      elseif (len >= 2) and (out(len - 2)? == '\r') then
+        2
+      else
+        1
+      end
+    out.truncate(len - trunc_len)
+
+    recover String.from_iso_array(consume out) end
+
   fun ref read_u8(): U8 ? =>
     """
     Read a U8.
@@ -149,7 +202,7 @@ class IsoReader is Reader
     if _available < num_bytes then
       error
     end
-    try
+    if _chunks(0)?.size() >= num_bytes then
       let r = _chunks(0)?.read_u16(0)?
       if _chunks(0)?.size() > num_bytes then
         _chunks(0)?.trim_in_place(num_bytes)
@@ -159,36 +212,13 @@ class IsoReader is Reader
       _available = _available - num_bytes
       r
     else
-      let data = read_bytes(num_bytes)?
-
-      _decode_u16(consume data)?
-    end
-
-  fun _decode_u16(data: (Array[U8] val | Array[Array[U8] iso] val)): U16 ? =>
-    match data
-    | let d: Array[U8] val =>
-      d.read_u16(0)?
-    | let d: (Array[Array[U8] iso] val) =>
-      _decode_u16_array(d)?
-    end
-
-  fun _decode_u16_array(data: Array[Array[U8] iso] val): U16 ? =>
-    var out: U16 = 0
-    let iters = Array[Iterator[U8]]
-    for a in data.values() do
-      iters.push(a.values())
-    end
-    let iter_all = Iter[U8].chain(iters.values())
-    var i: U16 = 0
-    while iter_all.has_next() do
+      // single array did not have all the bytes needed
       ifdef bigendian then
-        out = (out << 8) or iter_all.next()?.u16()
+        (read_u8()?.u16() << 8) or read_u8()?.u16()
       else
-        out = out or (iter_all.next()?.u16() << (i * 8))
-        i = i + 1
+         read_u8()?.u16() or (read_u8()?.u16() << 8)
       end
     end
-    out
 
   fun ref read_u32(): U32 ? =>
     """
@@ -198,7 +228,7 @@ class IsoReader is Reader
     if _available < num_bytes then
       error
     end
-    try
+    if _chunks(0)?.size() >= num_bytes then
       let r = _chunks(0)?.read_u32(0)?
       if _chunks(0)?.size() > num_bytes then
         _chunks(0)?.trim_in_place(num_bytes)
@@ -208,36 +238,15 @@ class IsoReader is Reader
       _available = _available - num_bytes
       r
     else
-      let data = read_bytes(num_bytes)?
-
-      _decode_u32(consume data)?
-    end
-
-  fun _decode_u32(data: (Array[U8] val | Array[Array[U8] iso] val)): U32 ? =>
-    match data
-    | let d: Array[U8] val =>
-      d.read_u32(0)?
-    | let d: (Array[Array[U8] iso] val) =>
-      _decode_u32_array(d)?
-    end
-
-  fun _decode_u32_array(data: Array[Array[U8] iso] val): U32 ? =>
-    var out: U32 = 0
-    let iters = Array[Iterator[U8]]
-    for a in data.values() do
-      iters.push(a.values())
-    end
-    let iter_all = Iter[U8].chain(iters.values())
-    var i: U32 = 0
-    while iter_all.has_next() do
+      // single array did not have all the bytes needed
       ifdef bigendian then
-        out = (out << 8) or iter_all.next()?.u32()
+        (read_u8()?.u32() << 24) or (read_u8()?.u32() << 16) or
+          (read_u8()?.u32() << 8) or read_u8()?.u32()
       else
-        out = out or (iter_all.next()?.u32() << (i * 8))
-        i = i + 1
+        read_u8()?.u32() or (read_u8()?.u32() << 8) or
+          (read_u8()?.u32() << 16) or (read_u8()?.u32() << 24)
       end
     end
-    out
 
   fun ref read_u64(): U64 ? =>
     """
@@ -247,7 +256,7 @@ class IsoReader is Reader
     if _available < num_bytes then
       error
     end
-    try
+    if _chunks(0)?.size() >= num_bytes then
       let r = _chunks(0)?.read_u64(0)?
       if _chunks(0)?.size() > num_bytes then
         _chunks(0)?.trim_in_place(num_bytes)
@@ -257,36 +266,19 @@ class IsoReader is Reader
       _available = _available - num_bytes
       r
     else
-      let data = read_bytes(num_bytes)?
-
-      _decode_u64(consume data)?
-    end
-
-  fun _decode_u64(data: (Array[U8] val | Array[Array[U8] iso] val)): U64 ? =>
-    match data
-    | let d: Array[U8] val =>
-      d.read_u64(0)?
-    | let d: (Array[Array[U8] iso] val) =>
-      _decode_u64_array(d)?
-    end
-
-  fun _decode_u64_array(data: Array[Array[U8] iso] val): U64 ? =>
-    var out: U64 = 0
-    let iters = Array[Iterator[U8]]
-    for a in data.values() do
-      iters.push(a.values())
-    end
-    let iter_all = Iter[U8].chain(iters.values())
-    var i: U64 = 0
-    while iter_all.has_next() do
+      // single array did not have all the bytes needed
       ifdef bigendian then
-        out = (out << 8) or iter_all.next()?.u64()
+        (read_u8()?.u64() << 56) or (read_u8()?.u64() << 48) or
+          (read_u8()?.u64() << 40) or (read_u8()?.u64() << 32) or
+          (read_u8()?.u64() << 24) or (read_u8()?.u64() << 16) or
+          (read_u8()?.u64() << 8) or read_u8()?.u64()
       else
-        out = out or (iter_all.next()?.u64() << (i * 8))
-        i = i + 1
+        read_u8()?.u64() or (read_u8()?.u64() << 8) or
+          (read_u8()?.u64() << 16) or (read_u8()?.u64() << 24) or
+          (read_u8()?.u64() << 32) or (read_u8()?.u64() << 40) or
+          (read_u8()?.u64() << 48) or (read_u8()?.u64() << 56)
       end
     end
-    out
 
   fun ref read_u128(): U128 ? =>
     """
@@ -296,7 +288,7 @@ class IsoReader is Reader
     if _available < num_bytes then
       error
     end
-    try
+    if _chunks(0)?.size() >= num_bytes then
       let r = _chunks(0)?.read_u128(0)?
       if _chunks(0)?.size() > num_bytes then
         _chunks(0)?.trim_in_place(num_bytes)
@@ -306,36 +298,27 @@ class IsoReader is Reader
       _available = _available - num_bytes
       r
     else
-      let data = read_bytes(num_bytes)?
-
-      _decode_u128(consume data)?
-    end
-
-  fun _decode_u128(data: (Array[U8] val | Array[Array[U8] iso] val)): U128 ? =>
-    match data
-    | let d: Array[U8] val =>
-      d.read_u128(0)?
-    | let d: (Array[Array[U8] iso] val) =>
-      _decode_u128_array(d)?
-    end
-
-  fun _decode_u128_array(data: Array[Array[U8] iso] val): U128 ? =>
-    var out: U128 = 0
-    let iters = Array[Iterator[U8]]
-    for a in data.values() do
-      iters.push(a.values())
-    end
-    let iter_all = Iter[U8].chain(iters.values())
-    var i: U128 = 0
-    while iter_all.has_next() do
+      // single array did not have all the bytes needed
       ifdef bigendian then
-        out = (out << 8) or iter_all.next()?.u128()
+        (read_u8()?.u128() << 120) or (read_u8()?.u128() << 112) or
+          (read_u8()?.u128() << 104) or (read_u8()?.u128() << 96) or
+          (read_u8()?.u128() << 88) or (read_u8()?.u128() << 80) or
+          (read_u8()?.u128() << 72) or (read_u8()?.u128() << 64) or
+          (read_u8()?.u128() << 56) or (read_u8()?.u128() << 48) or
+          (read_u8()?.u128() << 40) or (read_u8()?.u128() << 32) or
+          (read_u8()?.u128() << 24) or (read_u8()?.u128() << 16) or
+          (read_u8()?.u128() << 8) or read_u8()?.u128()
       else
-        out = out or (iter_all.next()?.u128() << (i * 8))
-        i = i + 1
+        read_u8()?.u128() or (read_u8()?.u128() << 8) or
+          (read_u8()?.u128() << 16) or (read_u8()?.u128() << 24) or
+          (read_u8()?.u128() << 32) or (read_u8()?.u128() << 40) or
+          (read_u8()?.u128() << 48) or (read_u8()?.u128() << 56) or
+          (read_u8()?.u128() << 64) or (read_u8()?.u128() << 72) or
+          (read_u8()?.u128() << 80) or (read_u8()?.u128() << 88) or
+          (read_u8()?.u128() << 96) or (read_u8()?.u128() << 104) or
+          (read_u8()?.u128() << 112) or (read_u8()?.u128() << 120)
       end
     end
-    out
 
   fun ref read_byte(): U8 ? =>
     """
@@ -442,3 +425,39 @@ class IsoReader is Reader
     end
     _available = _available - len
     next_segment
+
+  fun ref _distance_of(byte: U8): USize ? =>
+    """
+    Get the distance to the first occurrence of the given byte
+    """
+    if _chunks.size() == 0 then
+      error
+    end
+
+    var node_offset: USize = 0
+    var search_len: USize = 0
+
+    while true do
+      try
+        let len = (search_len + _chunks(node_offset)?.find(byte)? + 1)
+        search_len = 0
+        return len
+      end
+
+      search_len = search_len + _chunks(node_offset)?.size()
+
+      node_offset = node_offset + 1
+
+      if node_offset > _chunks.size() then
+        break
+      end
+    end
+
+    error
+
+  fun ref _search_length(): USize ? =>
+    """
+    Get the length of a pending line. Raise an error if there is no pending
+    line.
+    """
+    _distance_of('\n')?

@@ -1,0 +1,43 @@
+use "ponybench"
+use "collections"
+
+actor Main is BenchmarkList
+  new create(env: Env) =>
+    PonyBench(env, this)
+
+  fun tag benchmarks(bench: PonyBench) =>
+    bench(_IsoReaderU8)
+    bench(_IsoReaderU8i)
+    bench(_IsoReaderU16)
+    bench(_IsoReaderU16i)
+    bench(_IsoReaderU16Split)
+    bench(_IsoReaderU32)
+    bench(_IsoReaderU32Split)
+    bench(_IsoReaderU64)
+    bench(_IsoReaderU64i)
+    bench(_IsoReaderU64Split)
+    bench(_IsoReaderU128)
+    bench(_IsoReaderU128Split)
+    bench(_ValReaderU8)
+    bench(_ValReaderU16)
+    bench(_ValReaderU16Split)
+    bench(_ValReaderU32)
+    bench(_ValReaderU32Split)
+    bench(_ValReaderU64)
+    bench(_ValReaderU64Split)
+    bench(_ValReaderU128)
+    bench(_ValReaderU128Split)
+    bench(_RewindableValReaderU8)
+    bench(_RewindableValReaderU16)
+    bench(_RewindableValReaderU16Split)
+    bench(_RewindableValReaderU32)
+    bench(_RewindableValReaderU32Split)
+    bench(_RewindableValReaderU64)
+    bench(_RewindableValReaderU64Split)
+    bench(_RewindableValReaderU128)
+    bench(_RewindableValReaderU128Split)
+    bench(_WriterU8)
+    bench(_WriterU16)
+    bench(_WriterU32)
+    bench(_WriterU64)
+    bench(_WriterU128)
