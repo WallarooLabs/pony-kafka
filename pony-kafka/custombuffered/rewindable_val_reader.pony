@@ -91,11 +91,11 @@ class RewindableValReader is RewindableReader
       env.input(recover Notify(env) end, 1024)
   ```
   """
-  embed _chunks: List[Array[U8] val] = _chunks.create()
+  embed _chunks: Array[Array[U8] val] = _chunks.create()
   var _available: USize = 0
   var _total_size: USize = 0
   var _current_position: USize = 0
-  var _current_node: (ListNode[Array[U8] val] | None) = None
+  var _current_node: USize = -1
   var _current_node_offset: USize = 0
 
   fun size(): USize =>
@@ -113,7 +113,7 @@ class RewindableValReader is RewindableReader
     _total_size = 0
     _current_position = 0
     _current_node_offset = 0
-    _current_node = None
+    _current_node = -1
 
   fun ref set_position(pos: USize) ? =>
     """
@@ -123,7 +123,7 @@ class RewindableValReader is RewindableReader
       _current_position = 0
       _current_node_offset = 0
       _available = _total_size
-      _current_node = _chunks.head()?
+      _current_node = 0
       skip(pos)?
     else
       error
@@ -148,11 +148,11 @@ class RewindableValReader is RewindableReader
     _available = _available - num_bytes
     _current_position = _current_position + num_bytes
 
-  fun ref _switch_node(node: ListNode[Array[U8] val]) =>
+  fun ref _switch_node() =>
     """
     Switch to the next node and update current node offset
     """
-    _current_node = node.next()
+    _current_node = _current_node + 1
     _current_node_offset = 0
 
   fun ref _append(data: ByteSeq) =>
@@ -169,11 +169,8 @@ class RewindableValReader is RewindableReader
     _total_size = _total_size + data_array.size()
     _chunks.push(data_array)
 
-    if _current_node is None then
-      try
-        // guaranteed not to fail since we just added a node
-        _current_node = _chunks.tail()?
-      end
+    if _current_node == -1 then
+      _current_node = _chunks.size() - 1
     end
 
   fun ref append(data: (ByteSeq | Array[ByteSeq] val)) =>
@@ -218,8 +215,7 @@ class RewindableValReader is RewindableReader
       var rem = n
 
       while rem > 0 do
-        let node = _current_node as ListNode[Array[U8] val]
-        var data = node()?
+        var data = _chunks(_current_node)?
         let avail = data.size() - _current_node_offset
 
         if avail > rem then
@@ -228,13 +224,13 @@ class RewindableValReader is RewindableReader
         end
 
         rem = rem - avail
-        _switch_node(node)
+        _switch_node()
       end
     else
       error
     end
 
-  fun ref block(len: USize): Array[U8] iso^ ? =>
+  fun ref read_block(len: USize): Array[U8] iso^ ? =>
     """
     Return a block as a contiguous chunk of memory.
     """
@@ -264,19 +260,19 @@ class RewindableValReader is RewindableReader
     but it is removed from the buffer. To read a line of text, prefer line()
     that handles \n and \r\n.
     """
-    let b = block(_distance_of(separator)? - 1)?
+    let b = read_block(_distance_of(separator)? - 1)?
     read_byte()?
     consume b
 
-  fun ref line(keep_line_breaks: Bool = false): String iso^ ? =>
+  fun ref read_line(keep_line_breaks: Bool = false): String iso^ ? =>
     """
     Return a \n or \r\n terminated line as a string. The newline is not
     included in the returned string, but it is removed from the network buffer.
     Set `keep_line_breaks` to `true` to keep the line breaks in the returned line.
     """
-    let len = _search_length()?
+    let len = _distance_of('\n')?
 
-    let out = block(len)?
+    let out = read_block(len)?
 
     let trunc_len: USize =
       if keep_line_breaks then
@@ -304,15 +300,14 @@ class RewindableValReader is RewindableReader
     if _available < num_bytes then
       error
     end
-    let node = _current_node as ListNode[Array[U8] val]
-    var data = node()?
+    var data = _chunks(_current_node)?
     if (data.size() - _current_node_offset) >= num_bytes then
       let r = data.read_u16(_current_node_offset)?
 
       _current_node_offset = _current_node_offset + num_bytes
       _increment_position(num_bytes)
       if _current_node_offset >= data.size() then
-        _switch_node(node)
+        _switch_node()
       end
       r
     else
@@ -332,15 +327,14 @@ class RewindableValReader is RewindableReader
     if _available < num_bytes then
       error
     end
-    let node = _current_node as ListNode[Array[U8] val]
-    var data = node()?
+    var data = _chunks(_current_node)?
     if (data.size() - _current_node_offset) >= num_bytes then
       let r = data.read_u32(_current_node_offset)?
 
       _current_node_offset = _current_node_offset + num_bytes
       _increment_position(num_bytes)
       if _current_node_offset >= data.size() then
-        _switch_node(node)
+        _switch_node()
       end
       r
     else
@@ -362,15 +356,14 @@ class RewindableValReader is RewindableReader
     if _available < num_bytes then
       error
     end
-    let node = _current_node as ListNode[Array[U8] val]
-    var data = node()?
+    var data = _chunks(_current_node)?
     if (data.size() - _current_node_offset) >= num_bytes then
       let r = data.read_u64(_current_node_offset)?
 
       _current_node_offset = _current_node_offset + num_bytes
       _increment_position(num_bytes)
       if _current_node_offset >= data.size() then
-        _switch_node(node)
+        _switch_node()
       end
       r
     else
@@ -396,15 +389,14 @@ class RewindableValReader is RewindableReader
     if _available < num_bytes then
       error
     end
-    let node = _current_node as ListNode[Array[U8] val]
-    var data = node()?
+    var data = _chunks(_current_node)?
     if (data.size() - _current_node_offset) >= num_bytes then
       let r = data.read_u128(_current_node_offset)?
 
       _current_node_offset = _current_node_offset + num_bytes
       _increment_position(num_bytes)
       if _current_node_offset >= data.size() then
-        _switch_node(node)
+        _switch_node()
       end
       r
     else
@@ -435,15 +427,14 @@ class RewindableValReader is RewindableReader
     Get a single byte.
     """
     let num_bytes = U8(0).bytewidth()
-    let node = _current_node as ListNode[Array[U8] val]
-    var data = node()?
+    var data = _chunks(_current_node)?
     let r = data.read_u8(_current_node_offset)?
 
     _current_node_offset = _current_node_offset + num_bytes
     _increment_position(num_bytes)
 
     if _current_node_offset >= data.size() then
-      _switch_node(node)
+      _switch_node()
     end
     r
 
@@ -469,8 +460,7 @@ class RewindableValReader is RewindableReader
     var i = USize(0)
 
     while i < len do
-      let node = _current_node as ListNode[Array[U8] val]
-      let data = node()?
+      let data = _chunks(_current_node)?
 
       let avail = data.size() - _current_node_offset
       let need = len - i
@@ -491,7 +481,7 @@ class RewindableValReader is RewindableReader
       end
 
       i = i + copy_len
-      _switch_node(node)
+      _switch_node()
     end
 
     (i, consume out)
@@ -509,18 +499,15 @@ class RewindableValReader is RewindableReader
       error
     end
 
-    let node = _current_node as ListNode[Array[U8] val]
-    let data = node()?
+    let data = _chunks(_current_node)?
 
     let avail = data.size() - _current_node_offset
     let need = len
     let copy_len = need.min(avail)
 
     if avail < len then
-      return block(len)?
+      return read_block(len)?
     end
-
-    var out = recover Array[Array[U8] val] end
 
     if avail >= need then
       let next_segment = data.trim(_current_node_offset, _current_node_offset + copy_len)
@@ -531,14 +518,14 @@ class RewindableValReader is RewindableReader
 
     error
 
-  fun box peek_u8(offset: USize = 0): U8 ? =>
+  fun ref peek_u8(offset: USize = 0): U8 ? =>
     """
     Get the U8 at the given offset without moving the cursor forward.
     Raise an error if the given offset is not yet available.
     """
     peek_byte(offset)?
 
-  fun box peek_u16(offset: USize = 0): U16 ? =>
+  fun ref peek_u16(offset: USize = 0): U16 ? =>
     """
     Get the U16 at the given offset without moving the cursor forward.
     Raise an error if the given offset is not yet available.
@@ -549,15 +536,15 @@ class RewindableValReader is RewindableReader
     end
     try
       var offset' = offset + _current_node_offset
-      var node = _current_node as ListNode[Array[U8] val] box
+      var current_node' = _current_node
 
       while true do
-        var data = node()?
+        var data = _chunks(current_node')?
 
         let data_size = data.size()
         if offset' >= data_size then
           offset' = offset' - data_size
-          node = node.next() as ListNode[Array[U8] val] box
+          current_node' = current_node' + 1
         else
           return data.read_u16(offset')?
         end
@@ -573,7 +560,7 @@ class RewindableValReader is RewindableReader
       end
     end
 
-  fun box peek_u32(offset: USize = 0): U32 ? =>
+  fun ref peek_u32(offset: USize = 0): U32 ? =>
     """
     Get the U32 at the given offset without moving the cursor forward.
     Raise an error if the given offset is not yet available.
@@ -584,15 +571,15 @@ class RewindableValReader is RewindableReader
     end
     try
       var offset' = offset + _current_node_offset
-      var node = _current_node as ListNode[Array[U8] val] box
+      var current_node' = _current_node
 
       while true do
-        var data = node()?
+        var data = _chunks(current_node')?
 
         let data_size = data.size()
         if offset' >= data_size then
           offset' = offset' - data_size
-          node = node.next() as ListNode[Array[U8] val] box
+          current_node' = current_node' + 1
         else
           return data.read_u32(offset')?
         end
@@ -610,7 +597,7 @@ class RewindableValReader is RewindableReader
       end
     end
 
-  fun box peek_u64(offset: USize = 0): U64 ? =>
+  fun ref peek_u64(offset: USize = 0): U64 ? =>
     """
     Get the U64 at the given offset without moving the cursor forward.
     Raise an error if the given offset is not yet available.
@@ -621,15 +608,15 @@ class RewindableValReader is RewindableReader
     end
     try
       var offset' = offset + _current_node_offset
-      var node = _current_node as ListNode[Array[U8] val] box
+      var current_node' = _current_node
 
       while true do
-        var data = node()?
+        var data = _chunks(current_node')?
 
         let data_size = data.size()
         if offset' >= data_size then
           offset' = offset' - data_size
-          node = node.next() as ListNode[Array[U8] val] box
+          current_node' = current_node' + 1
         else
           return data.read_u64(offset')?
         end
@@ -651,7 +638,7 @@ class RewindableValReader is RewindableReader
       end
     end
 
-  fun box peek_u128(offset: USize = 0): U128 ? =>
+  fun ref peek_u128(offset: USize = 0): U128 ? =>
     """
     Get the U128 at the given offset without moving the cursor forward.
     Raise an error if the given offset is not yet available.
@@ -662,15 +649,15 @@ class RewindableValReader is RewindableReader
     end
     try
       var offset' = offset + _current_node_offset
-      var node = _current_node as ListNode[Array[U8] val] box
+      var current_node' = _current_node
 
       while true do
-        var data = node()?
+        var data = _chunks(current_node')?
 
         let data_size = data.size()
         if offset' >= data_size then
           offset' = offset' - data_size
-          node = node.next() as ListNode[Array[U8] val] box
+          current_node' = current_node' + 1
         else
           return data.read_u128(offset')?
         end
@@ -700,7 +687,7 @@ class RewindableValReader is RewindableReader
       end
     end
 
-  fun box peek_byte(offset: USize = 0): U8 ? =>
+  fun ref peek_byte(offset: USize = 0): U8 ? =>
     """
     Get the byte at the given offset without moving the cursor forward.
     Raise an error if the given offset is not yet available.
@@ -710,15 +697,15 @@ class RewindableValReader is RewindableReader
     end
 
     var offset' = offset + _current_node_offset
-    var node = _current_node as ListNode[Array[U8] val] box
+    var current_node' = _current_node
 
     while true do
-      var data = node()?
+      var data = _chunks(current_node')?
 
       let data_size = data.size()
       if offset' >= data_size then
         offset' = offset' - data_size
-        node = node.next() as ListNode[Array[U8] val] box
+        current_node' = current_node' + 1
       else
         return data(offset')?
       end
@@ -726,7 +713,7 @@ class RewindableValReader is RewindableReader
 
     error
 
-  fun box peek_bytes(len: USize, offset: USize = 0):
+  fun ref peek_bytes(len: USize, offset: USize = 0):
     (Array[U8] val | Array[Array[U8] val] val) ?
   =>
     """
@@ -738,14 +725,15 @@ class RewindableValReader is RewindableReader
     end
 
     var offset' = offset + _current_node_offset
-    var node = _current_node as ListNode[Array[U8] val] box
+    var current_node' = _current_node
 
     while true do
-      var data = node()?
+      var data = _chunks(current_node')?
 
       let data_size = data.size()
       if offset' >= data_size then
         offset' = offset' - data_size
+        current_node' = current_node' + 1
       else
         if (data_size - offset') > len then
           return data.trim(offset', offset' + len)
@@ -758,8 +746,8 @@ class RewindableValReader is RewindableReader
         out.push(data.trim(offset'))
 
         while i < len do
-          node = node.next() as ListNode[Array[U8] val] box
-          let data' = node()?
+          current_node' = current_node' + 1
+          let data' = _chunks(current_node')?
 
           let avail = data'.size()
           let need = len - i
@@ -788,7 +776,7 @@ class RewindableValReader is RewindableReader
 
     error
 
-  fun box peek_contiguous_bytes(len: USize, offset: USize = 0): Array[U8] val ? =>
+  fun ref peek_contiguous_bytes(len: USize, offset: USize = 0): Array[U8] val ? =>
     """
     Return a block as a contiguous chunk of memory without copying if possible
     or copy together multiple chunks if required.
@@ -798,10 +786,10 @@ class RewindableValReader is RewindableReader
     end
 
     var offset' = offset + _current_node_offset
-    var node = _current_node as ListNode[Array[U8] val] box
+    var current_node' = _current_node
 
     while true do
-      var data = node()?
+      var data = _chunks(current_node')?
 
       let data_size = data.size()
       if offset' >= data_size then
@@ -832,12 +820,67 @@ class RewindableValReader is RewindableReader
 
       end
 
-      node = node.next() as ListNode[Array[U8] val] box
+      current_node' = current_node' + 1
     end
 
     error
 
-  fun ref _distance_of(byte: U8): USize ? =>
+  fun ref peek_block(len: USize, offset: USize = 0): Array[U8] iso^ ? =>
+    """
+    Return a block as a contiguous chunk of memory.
+    """
+    let num_bytes = len
+    let data = peek_bytes(len, offset)?
+
+    match data
+    | let a: Array[U8] val =>
+      recover a.clone() end
+    | let arr: Array[Array[U8] val] val =>
+      var out = recover Array[U8].>undefined(num_bytes) end
+      var i: USize = 0
+      for a in arr.values() do
+        out = recover
+          let r = consume ref out
+          a.copy_to(r, 0, i, a.size())
+          i = i + a.size()
+          consume r
+        end
+      end
+      out
+    end
+
+  fun ref peek_until(separator: U8, offset: USize = 0): Array[U8] iso^ ? =>
+    """
+    Find the first occurrence of the separator and return the block of bytes
+    before its position. The separator is not included in the returned array,
+    but it is removed from the buffer. To read a line of text, prefer line()
+    that handles \n and \r\n.
+    """
+    peek_block(_distance_of(separator, offset)? - 1, offset)?
+
+  fun ref peek_line(keep_line_breaks: Bool = false, offset: USize = 0): String iso^ ? =>
+    """
+    Return a \n or \r\n terminated line as a string. By default the newline is not
+    included in the returned string, but it is removed from the buffer.
+    Set `keep_line_breaks` to `true` to keep the line breaks in the returned line.
+    """
+    let len = _distance_of('\n', offset)?
+
+    let out = peek_block(len, offset)?
+
+    let trunc_len: USize =
+      if keep_line_breaks then
+        0
+      elseif (len >= 2) and (out(len - 2)? == '\r') then
+        2
+      else
+        1
+      end
+    out.truncate(len - trunc_len)
+
+    recover String.from_iso_array(consume out) end
+
+  fun ref _distance_of(byte: U8, offset: USize = 0): USize ? =>
     """
     Get the distance to the first occurence of the given byte
     """
@@ -845,34 +888,42 @@ class RewindableValReader is RewindableReader
       error
     end
 
-    var node = _current_node as ListNode[Array[U8] val]
     var search_len: USize = 0
-    var offset' = _current_node_offset
+    var offset' = offset + _current_node_offset
+    var current_node': USize = _current_node
+
+    if offset' > 0 then
+
+      while true do
+        var data = _chunks(current_node')?
+
+        let data_size = data.size()
+        if offset' >= data_size then
+          offset' = offset' - data_size
+          current_node' = current_node' + 1
+        else
+          break
+        end
+      end
+
+    end
 
     while true do
-      var data = node()?
-
       try
-        let len = (search_len + data.find(byte, offset')? + 1) - offset'
+        let len = (search_len + _chunks(current_node')?.find(byte, offset')? + 1) - offset'
         search_len = 0
         return len
       end
 
-      search_len = search_len + (data.size() - offset')
+      search_len = search_len + (_chunks(current_node')?.size() - offset')
 
-      if not node.has_next() then
+
+      if current_node' > _chunks.size() then
         break
       end
 
-      node = node.next() as ListNode[Array[U8] val]
+      current_node' = current_node' + 1
       offset' = 0
     end
 
     error
-
-  fun ref _search_length(): USize ? =>
-    """
-    Get the length of a pending line. Raise an error if there is no pending
-    line.
-    """
-    _distance_of('\n')?

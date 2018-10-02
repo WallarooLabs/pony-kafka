@@ -125,20 +125,20 @@ primitive LittleEndianDecoder
     """
     F64.from_bits(u64(rb)?)
 
-  fun peek_u8(rb: PeekableReader box, offset: USize = 0): U8 ? =>
+  fun peek_u8(rb: PeekableReader, offset: USize = 0): U8 ? =>
     """
     Peek at a U8 at the given offset. Raise an error if there isn't enough
     data.
     """
     rb.peek_u8(offset)?
 
-  fun peek_i8(rb: PeekableReader box, offset: USize = 0): I8 ? =>
+  fun peek_i8(rb: PeekableReader, offset: USize = 0): I8 ? =>
     """
     Peek at an I8.
     """
     peek_u8(rb, offset)?.i8()
 
-  fun peek_u16(rb: PeekableReader box, offset: USize = 0): U16 ? =>
+  fun peek_u16(rb: PeekableReader, offset: USize = 0): U16 ? =>
     """
     Peek at a little-endian U16.
     """
@@ -148,13 +148,13 @@ primitive LittleEndianDecoder
       rb.peek_u16(offset)?.bswap()
     end
 
-  fun peek_i16(rb: PeekableReader box, offset: USize = 0): I16 ? =>
+  fun peek_i16(rb: PeekableReader, offset: USize = 0): I16 ? =>
     """
     Peek at a little-endian I16.
     """
     peek_u16(rb, offset)?.i16()
 
-  fun peek_u32(rb: PeekableReader box, offset: USize = 0): U32 ? =>
+  fun peek_u32(rb: PeekableReader, offset: USize = 0): U32 ? =>
     """
     Peek at a little-endian U32.
     """
@@ -164,13 +164,13 @@ primitive LittleEndianDecoder
       rb.peek_u32(offset)?.bswap()
     end
 
-  fun peek_i32(rb: PeekableReader box, offset: USize = 0): I32 ? =>
+  fun peek_i32(rb: PeekableReader, offset: USize = 0): I32 ? =>
     """
     Peek at a little-endian I32.
     """
     peek_u32(rb, offset)?.i32()
 
-  fun peek_u64(rb: PeekableReader box, offset: USize = 0): U64 ? =>
+  fun peek_u64(rb: PeekableReader, offset: USize = 0): U64 ? =>
     """
     Peek at a little-endian U64.
     """
@@ -180,13 +180,13 @@ primitive LittleEndianDecoder
       rb.peek_u64(offset)?.bswap()
     end
 
-  fun peek_i64(rb: PeekableReader box, offset: USize = 0): I64 ? =>
+  fun peek_i64(rb: PeekableReader, offset: USize = 0): I64 ? =>
     """
     Peek at a little-endian I64.
     """
     peek_u64(rb, offset)?.i64()
 
-  fun peek_u128(rb: PeekableReader box, offset: USize = 0): U128 ? =>
+  fun peek_u128(rb: PeekableReader, offset: USize = 0): U128 ? =>
     """
     Peek at a little-endian U128.
     """
@@ -196,19 +196,19 @@ primitive LittleEndianDecoder
       rb.peek_u128(offset)?.bswap()
     end
 
-  fun peek_i128(rb: PeekableReader box, offset: USize = 0): I128 ? =>
+  fun peek_i128(rb: PeekableReader, offset: USize = 0): I128 ? =>
     """
     Peek at a little-endian I128.
     """
     peek_u128(rb, offset)?.i128()
 
-  fun peek_f32(rb: PeekableReader box, offset: USize = 0): F32 ? =>
+  fun peek_f32(rb: PeekableReader, offset: USize = 0): F32 ? =>
     """
     Peek at a little-endian F32.
     """
     F32.from_bits(peek_u32(rb, offset)?)
 
-  fun peek_f64(rb: PeekableReader box, offset: USize = 0): F64 ? =>
+  fun peek_f64(rb: PeekableReader, offset: USize = 0): F64 ? =>
     """
     Peek at a little-endian F64.
     """

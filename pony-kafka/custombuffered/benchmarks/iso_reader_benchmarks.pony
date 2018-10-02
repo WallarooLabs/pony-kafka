@@ -9,9 +9,8 @@ class iso _IsoReaderU8i is MicroBenchmark
     "_IsoReaderU8i"
 
   fun ref before_iteration() =>
-    if _d.size() <= 1 then
-      _d.clear()
-      _d.append(recover Array[U8].>undefined(2) end)
+    if _d.size() <= 128 then
+      _d.append(recover Array[U8].>undefined(10485760) end)
     end
 
   fun ref apply()? =>
@@ -44,9 +43,8 @@ class iso _IsoReaderU16i is MicroBenchmark
     "_IsoReaderU16i"
 
   fun ref before_iteration() =>
-    if _d.size() <= 2 then
-      _d.clear()
-      _d.append(recover Array[U8].>undefined(3) end)
+    if _d.size() <= 128 then
+      _d.append(recover Array[U8].>undefined(10485760) end)
     end
 
   fun ref apply()? =>

@@ -27,15 +27,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-use "collections"
-use "itertools"
-
-class IsoReader is Reader
+class IsoReader is PeekableReader
   """
   Store network data and provide a parsing interface.
   """
   embed _chunks: Array[Array[U8] iso] = _chunks.create()
   var _available: USize = 0
+  var _current_node: USize = 0
+  var _current_node_offset: USize = 0
 
   fun size(): USize =>
     """
@@ -49,12 +48,35 @@ class IsoReader is Reader
     """
     _chunks.clear()
     _available = 0
+    _current_node = 0
+    _current_node_offset = 0
 
+  fun ref _clean_read() ? =>
+    """
+    Clean up already read data so GC can do its thing.
+    """
+    if _current_node_offset > 0 then
+      _chunks(_current_node)?.trim_in_place(_current_node_offset)
+      _current_node_offset = 0
+    end
+    if _current_node > 0 then
+      _chunks.trim_in_place(_current_node)
+      _current_node = 0
+    end
+
+  fun ref optimize() ? =>
+    """
+    Clean up already read data so GC can do its thing.
+    """
+    _clean_read()?
 
   fun ref _append(data: ByteSeq iso) =>
     """
     Add a chunk of data.
     """
+    try
+      _clean_read()?
+    end
     let data_array =
       match consume data
       | let data': Array[U8] iso => consume data'
@@ -112,14 +134,15 @@ class IsoReader is Reader
       var rem = n
 
       while rem > 0 do
-        let avail = _chunks(0)?.size()
+        let avail = _chunks(_current_node)?.size() - _current_node_offset
 
         if avail > rem then
-          _chunks(0)?.trim_in_place(rem)
+          _current_node_offset = _current_node_offset + rem
           break
         end
 
-        _chunks.shift()?
+        _current_node = _current_node + 1
+        _current_node_offset = 0
         rem = rem - avail
       end
 
@@ -127,8 +150,7 @@ class IsoReader is Reader
       error
     end
 
-
-  fun ref block(len: USize): Array[U8] iso^ ? =>
+  fun ref read_block(len: USize): Array[U8] iso^ ? =>
     """
     Return a block as a contiguous chunk of memory.
     """
@@ -162,19 +184,19 @@ class IsoReader is Reader
     but it is removed from the buffer. To read a line of text, prefer line()
     that handles \n and \r\n.
     """
-    let b = block(_distance_of(separator)? - 1)?
+    let b = read_block(_distance_of(separator)? - 1)?
     read_u8()?
     consume b
 
-  fun ref line(keep_line_breaks: Bool = false): String iso^ ? =>
+  fun ref read_line(keep_line_breaks: Bool = false): String iso^ ? =>
     """
     Return a \n or \r\n terminated line as a string. By default the newline is not
     included in the returned string, but it is removed from the buffer.
     Set `keep_line_breaks` to `true` to keep the line breaks in the returned line.
     """
-    let len = _search_length()?
+    let len = _distance_of('\n')?
 
-    let out = block(len)?
+    let out = read_block(len)?
 
     let trunc_len: USize =
       if keep_line_breaks then
@@ -202,12 +224,13 @@ class IsoReader is Reader
     if _available < num_bytes then
       error
     end
-    if _chunks(0)?.size() >= num_bytes then
-      let r = _chunks(0)?.read_u16(0)?
-      if _chunks(0)?.size() > num_bytes then
-        _chunks(0)?.trim_in_place(num_bytes)
+    if _chunks(_current_node)?.size() >= (num_bytes + _current_node_offset) then
+      let r = _chunks(_current_node)?.read_u16(_current_node_offset)?
+      if _chunks(_current_node)?.size() > (num_bytes + _current_node_offset) then
+        _current_node_offset = _current_node_offset + num_bytes
       else
-        _chunks.shift()?
+        _current_node = _current_node + 1
+        _current_node_offset = 0
       end
       _available = _available - num_bytes
       r
@@ -228,12 +251,13 @@ class IsoReader is Reader
     if _available < num_bytes then
       error
     end
-    if _chunks(0)?.size() >= num_bytes then
-      let r = _chunks(0)?.read_u32(0)?
-      if _chunks(0)?.size() > num_bytes then
-        _chunks(0)?.trim_in_place(num_bytes)
+    if _chunks(_current_node)?.size() >= (num_bytes + _current_node_offset) then
+      let r = _chunks(_current_node)?.read_u32(_current_node_offset)?
+      if _chunks(_current_node)?.size() > (num_bytes + _current_node_offset) then
+        _current_node_offset = _current_node_offset + num_bytes
       else
-        _chunks.shift()?
+        _current_node = _current_node + 1
+        _current_node_offset = 0
       end
       _available = _available - num_bytes
       r
@@ -256,12 +280,13 @@ class IsoReader is Reader
     if _available < num_bytes then
       error
     end
-    if _chunks(0)?.size() >= num_bytes then
-      let r = _chunks(0)?.read_u64(0)?
-      if _chunks(0)?.size() > num_bytes then
-        _chunks(0)?.trim_in_place(num_bytes)
+    if _chunks(_current_node)?.size() >= (num_bytes + _current_node_offset) then
+      let r = _chunks(_current_node)?.read_u64(_current_node_offset)?
+      if _chunks(_current_node)?.size() > (num_bytes + _current_node_offset) then
+        _current_node_offset = _current_node_offset + num_bytes
       else
-        _chunks.shift()?
+        _current_node = _current_node + 1
+        _current_node_offset = 0
       end
       _available = _available - num_bytes
       r
@@ -288,12 +313,13 @@ class IsoReader is Reader
     if _available < num_bytes then
       error
     end
-    if _chunks(0)?.size() >= num_bytes then
-      let r = _chunks(0)?.read_u128(0)?
-      if _chunks(0)?.size() > num_bytes then
-        _chunks(0)?.trim_in_place(num_bytes)
+    if _chunks(_current_node)?.size() >= (num_bytes + _current_node_offset) then
+      let r = _chunks(_current_node)?.read_u128(_current_node_offset)?
+      if _chunks(_current_node)?.size() > (num_bytes + _current_node_offset) then
+        _current_node_offset = _current_node_offset + num_bytes
       else
-        _chunks.shift()?
+        _current_node = _current_node + 1
+        _current_node_offset = 0
       end
       _available = _available - num_bytes
       r
@@ -325,12 +351,13 @@ class IsoReader is Reader
     Get a single byte.
     """
     let num_bytes = U8(0).bytewidth()
-    let r = _chunks(0)?.read_u8(0)?
+    let r = _chunks(_current_node)?.read_u8(_current_node_offset)?
     _available = _available - num_bytes
-    if _chunks(0)?.size() > num_bytes then
-      _chunks(0)?.trim_in_place(num_bytes)
+    if _chunks(_current_node)?.size() > (num_bytes + _current_node_offset) then
+      _current_node_offset = _current_node_offset + num_bytes
     else
-      _chunks.shift()?
+      _current_node = _current_node + 1
+      _current_node_offset = 0
     end
     r
 
@@ -351,6 +378,8 @@ class IsoReader is Reader
     if _available < len then
       error
     end
+
+    _clean_read()?
 
     _available = _available - len
     var data' = _chunks.shift()?
@@ -405,12 +434,14 @@ class IsoReader is Reader
       error
     end
 
+    _clean_read()?
+
     let avail = _chunks(0)?.size()
 
     // if we have enough data but not in a single contiguous chunk, call `block`
     // to copy chunks together
     if avail < len then
-      return block(len)?
+      return read_block(len)?
     end
 
     var out = recover Array[Array[U8] iso] end
@@ -426,7 +457,376 @@ class IsoReader is Reader
     _available = _available - len
     next_segment
 
-  fun ref _distance_of(byte: U8): USize ? =>
+  fun ref peek_u8(offset: USize = 0): U8 ? =>
+    """
+    Get the U8 at the given offset without moving the cursor forward.
+    Raise an error if the given offset is not yet available.
+    """
+    peek_byte(offset)?
+
+  fun ref peek_u16(offset: USize = 0): U16 ? =>
+    """
+    Get the U16 at the given offset without moving the cursor forward.
+    Raise an error if the given offset is not yet available.
+    """
+    let num_bytes = U16(0).bytewidth()
+    if _available < (offset + num_bytes) then
+      error
+    end
+    try
+      var offset' = offset + _current_node_offset
+      var current_node' = _current_node
+
+      while true do
+        let data_size = _chunks(current_node')?.size()
+        if offset' >= data_size then
+          offset' = offset' - data_size
+          current_node' = current_node' + 1
+        else
+          return _chunks(current_node')?.read_u16(offset')?
+        end
+      end
+
+      error
+    else
+      // single array did not have all the bytes needed
+      ifdef bigendian then
+        (peek_u8(offset)?.u16() << 8) or peek_u8(offset + 1)?.u16()
+      else
+         peek_u8(offset)?.u16() or (peek_u8(offset + 1)?.u16() << 8)
+      end
+    end
+
+  fun ref peek_u32(offset: USize = 0): U32 ? =>
+    """
+    Get the U32 at the given offset without moving the cursor forward.
+    Raise an error if the given offset is not yet available.
+    """
+    let num_bytes = U32(0).bytewidth()
+    if _available < (offset + num_bytes) then
+      error
+    end
+    try
+      var offset' = offset + _current_node_offset
+      var current_node' = _current_node
+
+      while true do
+        let data_size = _chunks(current_node')?.size()
+        if offset' >= data_size then
+          offset' = offset' - data_size
+          current_node' = current_node' + 1
+        else
+          return _chunks(current_node')?.read_u32(offset')?
+        end
+      end
+
+      error
+    else
+      // single array did not have all the bytes needed
+      ifdef bigendian then
+        (peek_u8(offset)?.u32() << 24) or (peek_u8(offset + 1)?.u32() << 16) or
+          (peek_u8(offset + 2)?.u32() << 8) or peek_u8(offset + 3)?.u32()
+      else
+        peek_u8(offset)?.u32() or (peek_u8(offset + 1)?.u32() << 8) or
+          (peek_u8(offset + 2)?.u32() << 16) or (peek_u8(offset + 3)?.u32() << 24)
+      end
+    end
+
+  fun ref peek_u64(offset: USize = 0): U64 ? =>
+    """
+    Get the U64 at the given offset without moving the cursor forward.
+    Raise an error if the given offset is not yet available.
+    """
+    let num_bytes = U64(0).bytewidth()
+    if _available < (offset + num_bytes) then
+      error
+    end
+    try
+      var offset' = offset + _current_node_offset
+      var current_node' = _current_node
+
+      while true do
+        let data_size = _chunks(current_node')?.size()
+        if offset' >= data_size then
+          offset' = offset' - data_size
+          current_node' = current_node' + 1
+        else
+          return _chunks(current_node')?.read_u64(offset')?
+        end
+      end
+
+      error
+    else
+      // single array did not have all the bytes needed
+      ifdef bigendian then
+        (peek_u8(offset)?.u64() << 56) or (peek_u8(offset + 1)?.u64() << 48) or
+          (peek_u8(offset + 2)?.u64() << 40) or (peek_u8(offset + 3)?.u64() << 32) or
+          (peek_u8(offset + 4)?.u64() << 24) or (peek_u8(offset + 5)?.u64() << 16) or
+          (peek_u8(offset + 6)?.u64() << 8) or peek_u8(offset + 7)?.u64()
+      else
+        peek_u8(offset)?.u64() or (peek_u8(offset + 1)?.u64() << 8) or
+          (peek_u8(offset + 2)?.u64() << 16) or (peek_u8(offset + 3)?.u64() << 24) or
+          (peek_u8(offset + 4)?.u64() << 32) or (peek_u8(offset + 5)?.u64() << 40) or
+          (peek_u8(offset + 6)?.u64() << 48) or (peek_u8(offset + 7)?.u64() << 56)
+      end
+    end
+
+  fun ref peek_u128(offset: USize = 0): U128 ? =>
+    """
+    Get the U128 at the given offset without moving the cursor forward.
+    Raise an error if the given offset is not yet available.
+    """
+    let num_bytes = U128(0).bytewidth()
+    if _available < (offset + num_bytes) then
+      error
+    end
+    try
+      var offset' = offset + _current_node_offset
+      var current_node' = _current_node
+
+      while true do
+        let data_size = _chunks(current_node')?.size()
+        if offset' >= data_size then
+          offset' = offset' - data_size
+          current_node' = current_node' + 1
+        else
+          return _chunks(current_node')?.read_u128(offset')?
+        end
+      end
+
+      error
+    else
+      // single array did not have all the bytes needed
+      ifdef bigendian then
+        (peek_u8(offset)?.u128() << 120) or (peek_u8(offset + 1)?.u128() << 112) or
+          (peek_u8(offset + 2)?.u128() << 104) or (peek_u8(offset + 3)?.u128() << 96) or
+          (peek_u8(offset + 4)?.u128() << 88) or (peek_u8(offset + 5)?.u128() << 80) or
+          (peek_u8(offset + 6)?.u128() << 72) or (peek_u8(offset + 7)?.u128() << 64) or
+          (peek_u8(offset + 8)?.u128() << 56) or (peek_u8(offset + 9)?.u128() << 48) or
+          (peek_u8(offset + 10)?.u128() << 40) or (peek_u8(offset + 11)?.u128() << 32) or
+          (peek_u8(offset + 12)?.u128() << 24) or (peek_u8(offset + 13)?.u128() << 16) or
+          (peek_u8(offset + 14)?.u128() << 8) or peek_u8(offset + 15)?.u128()
+      else
+        peek_u8(offset)?.u128() or (peek_u8(offset + 1)?.u128() << 8) or
+          (peek_u8(offset + 2)?.u128() << 16) or (peek_u8(offset + 3)?.u128() << 24) or
+          (peek_u8(offset + 4)?.u128() << 32) or (peek_u8(offset + 5)?.u128() << 40) or
+          (peek_u8(offset + 6)?.u128() << 48) or (peek_u8(offset + 7)?.u128() << 56) or
+          (peek_u8(offset + 8)?.u128() << 64) or (peek_u8(offset + 9)?.u128() << 72) or
+          (peek_u8(offset + 10)?.u128() << 80) or (peek_u8(offset + 11)?.u128() << 88) or
+          (peek_u8(offset + 12)?.u128() << 96) or (peek_u8(offset + 13)?.u128() << 104) or
+          (peek_u8(offset + 14)?.u128() << 112) or (peek_u8(offset + 15)?.u128() << 120)
+      end
+    end
+
+  fun ref peek_byte(offset: USize = 0): U8 ? =>
+    """
+    Get the byte at the given offset without moving the cursor forward.
+    Raise an error if the given offset is not yet available.
+    """
+    if _available < (offset + 1) then
+      error
+    end
+
+    var offset' = offset + _current_node_offset
+    var current_node' = _current_node
+
+    while true do
+      let data_size = _chunks(current_node')?.size()
+      if offset' >= data_size then
+        offset' = offset' - data_size
+        current_node' = current_node' + 1
+      else
+        return _chunks(current_node')?(offset')?
+      end
+    end
+
+    error
+
+  fun ref peek_bytes(len: USize, offset: USize = 0):
+    (Array[U8] val | Array[Array[U8] val] val) ?
+  =>
+    """
+    Return a number of bytes as either a contiguous array or an array of arrays
+    without moving the cursor forward
+    """
+    if _available < (offset + len) then
+      error
+    end
+
+    var offset' = offset + _current_node_offset
+    var current_node' = _current_node
+
+    let x = recover Array[U8] end
+
+    if len == 0 then
+      return consume x
+    end
+
+    x.reserve(len)
+
+    while true do
+      let data_size = _chunks(current_node')?.size()
+      if offset' >= data_size then
+        offset' = offset' - data_size
+        current_node' = current_node' + 1
+      else
+        if (data_size - offset') > len then
+          var s = offset'
+          let e = offset' + len
+          while s < e do
+            x.push(_chunks(current_node')?(s)?)
+            s = s + 1
+          end
+          return consume x
+        end
+
+        var i = data_size - offset'
+
+        var s = offset'
+        let e = offset' + i
+        while s < e do
+          x.push(_chunks(current_node')?(s)?)
+          s = s + 1
+        end
+
+        while i < len do
+          current_node' = current_node' + 1
+          let avail = _chunks(current_node')?.size()
+          let need = len - i
+          let copy_len = need.min(avail)
+
+          var s': USize = 0
+          let e': USize = copy_len
+          while s' < e' do
+            x.push(_chunks(current_node')?(s')?)
+            s' = s' + 1
+          end
+
+          if avail > need then
+            return consume x
+          end
+
+          i = i + copy_len
+        end
+
+        return consume x
+
+      end
+    end
+
+    error
+
+  fun ref peek_contiguous_bytes(len: USize, offset: USize = 0): Array[U8] val ? =>
+    """
+    Return a block as a contiguous chunk of memory without copying if possible
+    or copy together multiple chunks if required.
+    """
+    if _available < (offset + len) then
+      error
+    end
+
+    var offset' = offset + _current_node_offset
+    var current_node' = _current_node
+
+    while true do
+      let data_size = _chunks(current_node')?.size()
+      if offset' >= data_size then
+        offset' = offset' - data_size
+      else
+        if (data_size - offset') > len then
+          let x = recover Array[U8] end
+          x.reserve(len)
+          var s = offset'
+          let e = offset' + len
+          while s < e do
+            x.push(_chunks(current_node')?(s)?)
+            s = s + 1
+          end
+          return consume x
+        end
+
+        let data' = peek_bytes(len, offset)?
+
+        match data'
+        | let a: Array[U8] val =>
+          return a
+        | let arr: Array[Array[U8] val] val =>
+          var out = recover Array[U8].>undefined(len) end
+          var i: USize = 0
+          for a in arr.values() do
+            out = recover
+              let r = consume ref out
+              a.copy_to(r, 0, i, a.size())
+              i = i + a.size()
+              consume r
+            end
+          end
+          return out
+        end
+
+      end
+
+      current_node' = current_node' + 1
+    end
+
+    error
+
+  fun ref peek_block(len: USize, offset: USize = 0): Array[U8] iso^ ? =>
+    """
+    Return a block as a contiguous chunk of memory.
+    """
+    let num_bytes = len
+    let data = peek_bytes(len, offset)?
+
+    match data
+    | let a: Array[U8] val =>
+      recover a.clone() end
+    | let arr: Array[Array[U8] val] val =>
+      var out = recover Array[U8].>undefined(num_bytes) end
+      var i: USize = 0
+      for a in arr.values() do
+        out = recover
+          let r = consume ref out
+          a.copy_to(r, 0, i, a.size())
+          i = i + a.size()
+          consume r
+        end
+      end
+      out
+    end
+
+  fun ref peek_until(separator: U8, offset: USize = 0): Array[U8] iso^ ? =>
+    """
+    Find the first occurrence of the separator and return the block of bytes
+    before its position. The separator is not included in the returned array,
+    but it is removed from the buffer. To read a line of text, prefer line()
+    that handles \n and \r\n.
+    """
+    peek_block(_distance_of(separator, offset)? - 1, offset)?
+
+  fun ref peek_line(keep_line_breaks: Bool = false, offset: USize = 0): String iso^ ? =>
+    """
+    Return a \n or \r\n terminated line as a string. By default the newline is not
+    included in the returned string, but it is removed from the buffer.
+    Set `keep_line_breaks` to `true` to keep the line breaks in the returned line.
+    """
+    let len = _distance_of('\n', offset)?
+
+    let out = peek_block(len, offset)?
+
+    let trunc_len: USize =
+      if keep_line_breaks then
+        0
+      elseif (len >= 2) and (out(len - 2)? == '\r') then
+        2
+      else
+        1
+      end
+    out.truncate(len - trunc_len)
+
+    recover String.from_iso_array(consume out) end
+
+  fun ref _distance_of(byte: U8, offset: USize = 0): USize ? =>
     """
     Get the distance to the first occurrence of the given byte
     """
@@ -434,30 +834,40 @@ class IsoReader is Reader
       error
     end
 
-    var node_offset: USize = 0
+    _clean_read()?
+
+    var offset': USize = offset
     var search_len: USize = 0
+    var current_node': USize = 0
+
+    if offset' > 0 then
+
+      while true do
+        let data_size = _chunks(current_node')?.size()
+        if offset' >= data_size then
+          offset' = offset' - data_size
+          current_node' = current_node' + 1
+        else
+          break
+        end
+      end
+
+    end
 
     while true do
       try
-        let len = (search_len + _chunks(node_offset)?.find(byte)? + 1)
+        let len = (search_len + _chunks(current_node')?.find(byte, offset')? + 1) - offset'
         search_len = 0
         return len
       end
 
-      search_len = search_len + _chunks(node_offset)?.size()
+      search_len = search_len + _chunks(current_node')?.size()
 
-      node_offset = node_offset + 1
+      current_node' = current_node' + 1
 
-      if node_offset > _chunks.size() then
+      if current_node' > _chunks.size() then
         break
       end
     end
 
     error
-
-  fun ref _search_length(): USize ? =>
-    """
-    Get the length of a pending line. Raise an error if there is no pending
-    line.
-    """
-    _distance_of('\n')?
