@@ -831,10 +831,11 @@ primitive _KafkaMessageSetCodecV0V1
         offset, crc, consume remaining_msg_data, part_state, log_append_timestamp,
         check_crc, err_str)
       let tmp_msgs = consume ref msgs
+      // reverse in place to avoid having to do expensive shifts for each element
+      tmp_msgs.reverse_in_place()
       while tmp_msgs.size() > 0 do
-        // TODO: figure out a way to avoid the shift
         try
-          let m = tmp_msgs.shift()?
+          let m = tmp_msgs.pop()?
           messages.push(consume m)
         else
           logger(Error) and logger.log(Error, "This should NEVER happen.")
