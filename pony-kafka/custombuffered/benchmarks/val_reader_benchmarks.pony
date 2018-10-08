@@ -108,20 +108,20 @@ class iso _ValReaderU32Split is MicroBenchmark
 class iso _ValReaderU64 is MicroBenchmark
   // Benchmark reading U64
   let _d: ValReader = _d.create()
-  let _b: Array[U8] val = recover Array[U8].>undefined(10485760) end
-
-  new iso create() =>
-    _d.append(_b)
+  let _b: Array[U8] val = recover Array[U8].>undefined(9) end
 
   fun name(): String =>
     "_ValReaderU64"
 
+  fun ref before_iteration() =>
+    if _d.size() <= 8 then
+      _d.clear()
+      _d.append(_b)
+    end
+
   fun ref apply()? =>
     DoNotOptimise[U64](_d.read_u64()?)
     DoNotOptimise.observe()
-    if _d.size() < 128 then
-      _d.append(_b)
-    end
 
 class iso _ValReaderU64Split is MicroBenchmark
   // Benchmark reading a split U64
@@ -151,20 +151,20 @@ class iso _ValReaderU64Split is MicroBenchmark
 class iso _ValReaderU128 is MicroBenchmark
   // Benchmark reading U128
   let _d: ValReader = _d.create()
-  let _b: Array[U8] val = recover Array[U8].>undefined(10485760) end
-
-  new iso create() =>
-    _d.append(_b)
+  let _b: Array[U8] val = recover Array[U8].>undefined(17) end
 
   fun name(): String =>
     "_ValReaderU128"
 
+  fun ref before_iteration() =>
+    if _d.size() <= 16 then
+      _d.clear()
+      _d.append(_b)
+    end
+
   fun ref apply()? =>
     DoNotOptimise[U128](_d.read_u128()?)
     DoNotOptimise.observe()
-    if _d.size() < 128 then
-      _d.append(_b)
-    end
 
 class iso _ValReaderU128Split is MicroBenchmark
   // Benchmark reading a split U128

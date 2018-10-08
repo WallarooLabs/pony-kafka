@@ -103,17 +103,19 @@ class iso _RewindableValReaderU64 is MicroBenchmark
   let _d: RewindableValReader = _d.create()
 
   new iso create() =>
-    _d.append(recover Array[U8].>undefined(10485760) end)
+    _d.append(recover Array[U8].>undefined(9) end)
 
   fun name(): String =>
     "_RewindableValReaderU64"
 
+  fun ref before_iteration() ? =>
+    if _d.size() <= 8 then
+      _d.set_position(0)?
+    end
+
   fun ref apply()? =>
     DoNotOptimise[U64](_d.read_u64()?)
     DoNotOptimise.observe()
-    if _d.size() < 128 then
-      _d.set_position(0)?
-    end
 
 class iso _RewindableValReaderU64Split is MicroBenchmark
   // Benchmark reading a split U64
@@ -143,17 +145,19 @@ class iso _RewindableValReaderU128 is MicroBenchmark
   let _d: RewindableValReader = _d.create()
 
   new iso create() =>
-    _d.append(recover Array[U8].>undefined(10485760) end)
+    _d.append(recover Array[U8].>undefined(17) end)
 
   fun name(): String =>
     "_RewindableValReaderU128"
 
+  fun ref before_iteration() ? =>
+    if _d.size() <= 16 then
+      _d.set_position(0)?
+    end
+
   fun ref apply()? =>
     DoNotOptimise[U128](_d.read_u128()?)
     DoNotOptimise.observe()
-    if _d.size() < 128 then
-      _d.set_position(0)?
-    end
 
 class iso _RewindableValReaderU128Split is MicroBenchmark
   // Benchmark reading a split U128
