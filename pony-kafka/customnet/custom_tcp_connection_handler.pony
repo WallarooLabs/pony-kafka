@@ -37,6 +37,8 @@ use @pony_asio_event_unsubscribe[None](event: AsioEventID)
 use @pony_asio_event_resubscribe_read[None](event: AsioEventID)
 use @pony_asio_event_resubscribe_write[None](event: AsioEventID)
 use @pony_asio_event_destroy[None](event: AsioEventID)
+use @pony_asio_event_set_writeable[None](event: AsioEventID, writeable: Bool)
+use @pony_asio_event_set_readable[None](event: AsioEventID, readable: Bool)
 
 // TODO: Move some of the logic into primitives that take a handler ref to work
 // on to hopefully allow for reusability between tcp/udp/etc connections
@@ -55,8 +57,11 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   var _shutdown_peer: Bool = false
   var _in_sent: Bool = false
 
-  embed _pending: List[(ByteSeq, USize)] = _pending.create()
-  embed _pending_writev: Array[USize] = _pending_writev.create()
+
+  embed _pending_writev_posix: Array[(Pointer[U8] tag, USize)] = _pending_writev_posix.create()
+  embed _pending_writev_windows: Array[(USize, Pointer[U8] tag)] = _pending_writev_windows.create()
+
+  var _pending_sent: USize = 0
   var _pending_writev_total: USize = 0
 
   var _read_buf: Array[U8] iso
@@ -76,9 +81,14 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   let _service: String
   let _from: String
 
-  new create(conn: CustomTCPConnection, auth: TCPConnectionAuth,
+  new create(
+    conn: CustomTCPConnection,
+    auth: TCPConnectionAuth,
     notify': CustomTCPConnectionNotify iso,
-    host: String, service: String, from: String = "", init_size: USize = 64,
+    host: String,
+    service: String,
+    from: String = "",
+    init_size: USize = 64,
     max_size: USize = 16384)
   =>
     """
@@ -89,18 +99,23 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     _host = host
     _service = service
     _from = from
-    _read_buf = recover Array[U8].>undefined(init_size) end
+    _read_buf = recover Array[U8] .> undefined(init_size) end
     _next_size = init_size
     _max_size = max_size
     notify = consume notify'
-    _connect_count = @pony_os_connect_tcp[U32](conn,
-      host.cstring(), service.cstring(),
-      from.cstring())
+    _connect_count =
+      @pony_os_connect_tcp[U32](conn, host.cstring(), service.cstring(),
+        from.cstring())
     _notify_connecting()
 
-  new ip4(conn: CustomTCPConnection, auth: TCPConnectionAuth,
+  new ip4(
+    conn: CustomTCPConnection,
+    auth: TCPConnectionAuth,
     notify': CustomTCPConnectionNotify iso,
-    host: String, service: String, from: String = "", init_size: USize = 64,
+    host: String,
+    service: String,
+    from: String = "",
+    init_size: USize = 64,
     max_size: USize = 16384)
   =>
     """
@@ -110,18 +125,23 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     _host = host
     _service = service
     _from = from
-    _read_buf = recover Array[U8].>undefined(init_size) end
+    _read_buf = recover Array[U8] .> undefined(init_size) end
     _next_size = init_size
     _max_size = max_size
     notify = consume notify'
-    _connect_count = @pony_os_connect_tcp4[U32](conn,
-      host.cstring(), service.cstring(),
-      from.cstring())
+    _connect_count =
+      @pony_os_connect_tcp4[U32](conn, host.cstring(), service.cstring(),
+        from.cstring())
     _notify_connecting()
 
-  new ip6(conn: CustomTCPConnection, auth: TCPConnectionAuth,
+  new ip6(
+    conn: CustomTCPConnection,
+    auth: TCPConnectionAuth,
     notify': CustomTCPConnectionNotify iso,
-    host: String, service: String, from: String = "", init_size: USize = 64,
+    host: String,
+    service: String,
+    from: String = "",
+    init_size: USize = 64,
     max_size: USize = 16384)
   =>
     """
@@ -131,18 +151,22 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     _host = host
     _service = service
     _from = from
-    _read_buf = recover Array[U8].>undefined(init_size) end
+    _read_buf = recover Array[U8] .> undefined(init_size) end
     _next_size = init_size
     _max_size = max_size
     notify = consume notify'
-    _connect_count = @pony_os_connect_tcp6[U32](conn,
-      host.cstring(), service.cstring(),
-      from.cstring())
+    _connect_count =
+      @pony_os_connect_tcp6[U32](conn, host.cstring(), service.cstring(),
+        from.cstring())
     _notify_connecting()
 
-  new accept(conn: CustomTCPConnection, listen: TCPListener,
-    notify': CustomTCPConnectionNotify iso, fd: U32,
-    init_size: USize = 64, max_size: USize = 16384)
+  new accept(
+    conn: CustomTCPConnection,
+    listen: TCPListener,
+    notify': CustomTCPConnectionNotify iso,
+    fd: U32,
+    init_size: USize = 64,
+    max_size: USize = 16384)
   =>
     """
     A new connection accepted on a server.
@@ -157,23 +181,34 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     notify = consume notify'
     _connect_count = 0
     _fd = fd
-    _event = @pony_asio_event_create(conn, fd,
-      AsioEvent.read_write_oneshot(), 0, true)
+    ifdef not windows then
+      _event = @pony_asio_event_create(conn, fd,
+        AsioEvent.read_write_oneshot(), 0, true)
+    else
+      _event = @pony_asio_event_create(conn, fd,
+        AsioEvent.read_write(), 0, true)
+    end
     _connected = true
-    @pony_asio_event_set_writeable[None](_event, true)
+    ifdef not windows then
+      @pony_asio_event_set_writeable(_event, true)
+    end
     _writeable = true
-    _read_buf = recover Array[U8].>undefined(init_size) end
+    _read_buf = recover Array[U8] .> undefined(init_size) end
     _next_size = init_size
     _max_size = max_size
 
     notify.accepted(conn)
+
+    _readable = true
     _queue_read()
+    pending_reads()
 
   fun ref write(data: ByteSeq) =>
     """
-    Write a single sequence of bytes.
+    Write a single sequence of bytes. Data will be silently discarded if the
+    connection has not yet been established though.
     """
-    if not _closed then
+    if _connected and not _closed then
       _in_sent = true
       write_final(notify.sent(_conn, data))
       _in_sent = false
@@ -182,31 +217,54 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   fun ref queue(data: ByteSeq) =>
     """
     Queue a single sequence of bytes on linux.
-    Do nothing on windows.
+    Compile error on windows.
     """
     ifdef not windows then
-      _pending_writev.>push(data.cpointer().usize()).>push(data.size())
+      _pending_writev_posix .> push((data.cpointer(), data.size()))
       _pending_writev_total = _pending_writev_total + data.size()
-      _pending.push((data, 0))
+    else
+      compile_error "no queueing on windows"
     end
 
   fun ref writev(data: ByteSeqIter) =>
     """
-    Write a sequence of sequences of bytes.
+    Write a sequence of sequences of bytes. Data will be silently discarded if
+    the connection has not yet been established though.
     """
-
-    if not _closed then
+    if _connected and not _closed then
       _in_sent = true
 
       ifdef windows then
-        for bytes in notify.sentv(_conn, data).values() do
-          write_final(bytes)
+        try
+          var num_to_send: I32 = 0
+          for bytes in notify.sentv(_conn, data).values() do
+            // Add an IOCP write.
+            _pending_writev_windows
+              .> push((bytes.size(), bytes.cpointer()))
+            _pending_writev_total = _pending_writev_total + bytes.size()
+            num_to_send = num_to_send + 1
+          end
+
+          // Write as much data as possible.
+          var len =
+            @pony_os_writev[USize](_event,
+              _pending_writev_windows.cpointer(_pending_sent),
+              num_to_send) ?
+
+          _pending_sent = _pending_sent + num_to_send.usize()
+
+          if _pending_sent > 32 then
+            // If more than 32 asynchronous writes are scheduled, apply
+            // backpressure. The choice of 32 is rather arbitrary an
+            // probably needs tuning
+            _apply_backpressure()
+          end
         end
       else
         for bytes in notify.sentv(_conn, data).values() do
-          _pending_writev.>push(bytes.cpointer().usize()).>push(bytes.size())
+          _pending_writev_posix
+            .> push((bytes.cpointer(), bytes.size()))
           _pending_writev_total = _pending_writev_total + bytes.size()
-          _pending.push((bytes, 0))
         end
 
         _pending_writes()
@@ -218,24 +276,27 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   fun ref queuev(data: ByteSeqIter) =>
     """
     Queue a sequence of sequences of bytes on linux.
-    Do nothing on windows.
+    Compile error on windows.
     """
 
     ifdef not windows then
       for bytes in notify.sentv(_conn, data).values() do
-        _pending_writev.>push(bytes.cpointer().usize()).>push(bytes.size())
+        _pending_writev_posix .> push((bytes.cpointer(), bytes.size()))
         _pending_writev_total = _pending_writev_total + bytes.size()
-        _pending.push((bytes, 0))
       end
+    else
+      compile_error "no queueing on windows"
     end
 
   fun ref send_queue() =>
     """
     Write pending queue to network on linux.
-    Do nothing on windows.
+    Compile error on windows.
     """
     ifdef not windows then
       _pending_writes()
+    else
+      compile_error "no queueing on windows"
     end
 
   fun ref mute(d: Any tag) =>
@@ -310,14 +371,15 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     socket.
     """
     if _connected then
-      @pony_os_nodelay[None](_fd, state)
+      set_tcp_nodelay(state)
     end
 
   fun ref set_keepalive(secs: U32) =>
     """
-    Sets the TCP keepalive timeout to approximately secs seconds. Exact timing
-    is OS dependent. If secs is zero, TCP keepalive is disabled. TCP keepalive
-    is disabled by default. This can only be set on a connected socket.
+    Sets the TCP keepalive timeout to approximately `secs` seconds. Exact
+    timing is OS dependent. If `secs` is zero, TCP keepalive is disabled. TCP
+    keepalive is disabled by default. This can only be set on a connected
+    socket.
     """
     if _connected then
       @pony_os_keepalive[None](_fd, secs)
@@ -338,7 +400,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
           // We don't have a connection yet
           // or we have a re-connection after a disonnect.
 
-          if @pony_os_connected[Bool](fd) then
+          if _is_sock_connected(fd) then
             // The connection was successful, make it ours.
             _fd = fd
             _event = event
@@ -346,8 +408,11 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
             // clear anything pending to be sent because on recovery we're
             // going to have to replay from our queue when requested
             // for new connections this is effectively a no-op
-            _pending_writev.clear()
-            _pending.clear()
+            ifdef not windows then
+              _pending_writev_posix.clear()
+            else
+              _pending_writev_windows.clear()
+            end
             _pending_writev_total = 0
 
             _connected = true
@@ -366,7 +431,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
             // closed connection.
             ifdef not windows then
               if _pending_writes() then
-                //sent all data; release backpressure
+                // Sent all data; release backpressure
                 _release_backpressure()
               end
             end
@@ -381,6 +446,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
           // We're already connected, unsubscribe the event and close.
           @pony_asio_event_unsubscribe(event)
           @pony_os_socket_close[None](fd)
+          _try_shutdown()
         end
       else
         // It's not our event.
@@ -397,7 +463,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
           _complete_writes(arg)
             ifdef not windows then
               if _pending_writes() then
-                //sent all data; release backpressure
+                // Sent all data; release backpressure
                 _release_backpressure()
               end
             end
@@ -420,18 +486,24 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
 
   fun ref write_final(data: ByteSeq) =>
     """
-    Write as much as possible to the socket. Set _writeable to false if not
-    everything was written. On an error, close the connection. This is for
-    data that has already been transformed by the notifier.
+    Write as much as possible to the socket. Set `_writeable` to `false` if not
+    everything was written. On an error, close the connection. This is for data
+    that has already been transformed by the notifier. Data will be silently
+    discarded if the connection has not yet been established though.
     """
-    if not _closed then
+    if _connected and not _closed then
       ifdef windows then
         try
           // Add an IOCP write.
-          @pony_os_send[USize](_event, data.cpointer(), data.size()) ?
-          _pending.push((data, 0))
+          _pending_writev_windows .> push((data.size(), data.cpointer()))
+          _pending_writev_total = _pending_writev_total + data.size()
 
-          if _pending.size() > 32 then
+          @pony_os_writev[USize](_event,
+            _pending_writev_windows.cpointer(_pending_sent), I32(1)) ?
+
+          _pending_sent = _pending_sent + 1
+
+          if _pending_sent > 32 then
             // If more than 32 asynchronous writes are scheduled, apply
             // backpressure. The choice of 32 is rather arbitrary an
             // probably needs tuning
@@ -439,45 +511,30 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
           end
         end
       else
-        _pending_writev.>push(data.cpointer().usize()).>push(data.size())
+        _pending_writev_posix .> push((data.cpointer(), data.size()))
         _pending_writev_total = _pending_writev_total + data.size()
-        _pending.push((data, 0))
         _pending_writes()
       end
     end
 
   fun ref _complete_writes(len: U32) =>
     """
-    The OS has informed as that len bytes of pending writes have completed.
+    The OS has informed us that `len` bytes of pending writes have completed.
     This occurs only with IOCP on Windows.
     """
     ifdef windows then
-      var rem = len.usize()
-
-      if rem == 0 then
+      if len == 0 then
         // IOCP reported a failed write on this chunk. Non-graceful shutdown.
-        try _pending.shift()? end
         _hard_close()
         return
       end
 
-      while rem > 0 do
-        try
-          let node = _pending.head()?
-          (let data, let offset) = node()?
-          let total = rem + offset
-
-          if total < data.size() then
-            node()? = (data, total)
-            rem = 0
-          else
-            _pending.shift()?
-            rem = total - data.size()
-          end
-        end
+      try
+        _manage_pending_buffer(len.usize(),
+          _pending_writev_total, _pending_writev_windows.size())?
       end
 
-      if _pending.size() < 16 then
+      if _pending_sent < 16 then
         // If fewer than 16 asynchronous writes are scheduled, remove
         // backpressure. The choice of 16 is rather arbitrary and probably
         // needs to be tuned.
@@ -498,56 +555,26 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       var bytes_to_send: USize = 0
       while _writeable and not _shutdown_peer and (_pending_writev_total > 0) do
         try
-          //determine number of bytes and buffers to send
-          if (_pending_writev.size()/2) < writev_batch_size then
-            num_to_send = _pending_writev.size()/2
+          // Determine number of bytes and buffers to send.
+          if _pending_writev_posix.size() < writev_batch_size then
+            num_to_send = _pending_writev_posix.size()
             bytes_to_send = _pending_writev_total
           else
-            //have more buffers than a single writev can handle
-            //iterate over buffers being sent to add up total
+            // Have more buffers than a single writev can handle.
+            // Iterate over buffers being sent to add up total.
             num_to_send = writev_batch_size
             bytes_to_send = 0
-            for d in Range[USize](1, num_to_send*2, 2) do
-              bytes_to_send = bytes_to_send + _pending_writev(d)?
+            for d in Range[USize](0, num_to_send, 1) do
+              bytes_to_send = bytes_to_send + _pending_writev_posix(d)?._2
             end
           end
 
           // Write as much data as possible.
           var len = @pony_os_writev[USize](_event,
-            _pending_writev.cpointer(), num_to_send) ?
+            _pending_writev_posix.cpointer(), num_to_send.i32()) ?
 
-          if len < bytes_to_send then
-            var num_sent: USize = 0
-            while len > 0 do
-              let iov_p = _pending_writev((num_sent*2)+0)?
-              let iov_s = _pending_writev((num_sent*2)+1)?
-              if iov_s <= len then
-                len = len - iov_s
-                num_sent = num_sent + 1
-                _pending.shift()?
-                _pending_writev_total = _pending_writev_total - iov_s
-              else
-                _pending_writev.update((num_sent*2)+0, iov_p+len)?
-                _pending_writev.update((num_sent*2)+1, iov_s-len)?
-                _pending_writev_total = _pending_writev_total - len
-                len = 0
-              end
-            end
-            _pending_writev.trim_in_place((num_sent*2))
-            _apply_backpressure()
-          else
-            // sent all data we requested in this batch
-            _pending_writev_total = _pending_writev_total - bytes_to_send
-            if _pending_writev_total == 0 then
-              _pending_writev.clear()
-              _pending.clear()
-              return true
-            else
-              _pending_writev.trim_in_place((num_to_send*2))
-              for d in Range[USize](0, num_to_send, 1) do
-                _pending.shift()?
-              end
-            end
+          if _manage_pending_buffer(len, bytes_to_send, num_to_send)? then
+            return true
           end
         else
           // Non-graceful shutdown on error.
@@ -558,9 +585,84 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
 
     false
 
+  fun ref _manage_pending_buffer(
+    bytes_sent: USize,
+    bytes_to_send: USize,
+    num_to_send: USize)
+    : Bool ?
+  =>
+    """
+    Manage pending buffer for data sent. Returns a boolean of whether
+    the pending buffer is empty or not.
+    """
+    var len = bytes_sent
+    if len < bytes_to_send then
+      var num_sent: USize = 0
+      while len > 0 do
+        (let iov_p, let iov_s) =
+          ifdef windows then
+            (let tmp_s, let tmp_p) = _pending_writev_windows(0)?
+            (tmp_p, tmp_s)
+          else
+            _pending_writev_posix(0)?
+          end
+        if iov_s <= len then
+          num_sent = num_sent + 1
+          len = len - iov_s
+          _pending_writev_total = _pending_writev_total - iov_s
+        else
+          ifdef windows then
+            _pending_writev_windows(0)? = (iov_s-len, iov_p.offset(len))
+          else
+            _pending_writev_posix(0)? = (iov_p.offset(len), iov_s-len)
+          end
+          _pending_writev_total = _pending_writev_total - len
+          len = 0
+        end
+      end
+
+      ifdef windows then
+        // do a trim in place instead of many shifts for efficiency
+        _pending_writev_windows.trim_in_place(num_sent)
+        _pending_sent = _pending_sent - num_sent
+      else
+        // do a trim in place instead of many shifts for efficiency
+        _pending_writev_posix.trim_in_place(num_sent)
+      end
+
+      ifdef not windows then
+        _apply_backpressure()
+      end
+    else
+      // sent all data we requested in this batch
+      _pending_writev_total = _pending_writev_total - bytes_to_send
+      if _pending_writev_total == 0 then
+        ifdef windows then
+          // do a trim in place instead of a clear to free up memory
+          _pending_writev_windows.trim_in_place(_pending_writev_windows.size())
+          _pending_sent = 0
+        else
+          // do a trim in place instead of a clear to free up memory
+          _pending_writev_posix.trim_in_place(_pending_writev_posix.size())
+        end
+        return true
+      else
+        ifdef windows then
+          // do a trim in place instead of many shifts for efficiency
+          _pending_writev_windows.trim_in_place(num_to_send)
+          _pending_sent = _pending_sent - 1
+        else
+          // do a trim in place instead of many shifts for efficiency
+          _pending_writev_posix.trim_in_place(num_to_send)
+        end
+      end
+    end
+
+    false
+
   fun ref _complete_reads(len: U32) =>
     """
-    The OS has informed as that len bytes of pending reads have completed.
+    The OS has informed us that `len` bytes of pending reads have completed.
     This occurs only with IOCP on Windows.
     """
     ifdef windows then
@@ -570,7 +672,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
         // cancelled the queued read.
         _readable = false
         _shutdown_peer = true
-        _hard_close()
+        close()
         return
       | _next_size =>
         _next_size = _max_size.min(_next_size * 2)
@@ -608,7 +710,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       try
         @pony_os_recv[USize](
           _event,
-          _read_buf.cpointer().usize() + _read_len,
+          _read_buf.cpointer(_read_len),
           _read_buf.size() - _read_len) ?
       else
         _hard_close()
@@ -634,7 +736,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
           // Read as much data as possible.
           let len = @pony_os_recv[USize](
             _event,
-            _read_buf.cpointer().usize() + _read_len,
+            _read_buf.cpointer(_read_len),
             _read_buf.size() - _read_len) ?
 
           match len
@@ -642,7 +744,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
             // Would block, try again later.
             // this is safe because asio thread isn't currently subscribed
             // for a read event so will not be writing to the readable flag
-            @pony_asio_event_set_readable[None](_event, false)
+            @pony_asio_event_set_readable(_event, false)
             _readable = false
             @pony_asio_event_resubscribe_read(_event)
             return
@@ -668,20 +770,20 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
             else
               _read_buf_size()
             end
+          end
 
-            sum = sum + len
+          sum = sum + len
 
-            if sum >= _max_size then
-              // If we've read _max_size, yield and read again later.
-              _conn._read_again()
-              return
-            end
+          if sum >= _max_size then
+            // If we've read _max_size, yield and read again later.
+            _conn._read_again()
+            return
           end
         end
       else
         // The socket has been closed from the other side.
         _shutdown_peer = true
-        _hard_close()
+        close()
       end
     end
 
@@ -707,13 +809,17 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     """
     Attempt to perform a graceful shutdown. Don't accept new writes. If the
     connection isn't muted then we won't finish closing until we get a zero
-    length read.  If the connection is muted, perform a hard close and
-    shut down immediately.
+    length read. If the connection is muted, perform a hard close and shut
+    down immediately.
     """
     ifdef windows then
       _close()
     else
-      _hard_close()
+      if _muted then
+        _hard_close()
+      else
+        _close()
+      end
     end
 
   fun ref _close() =>
@@ -729,16 +835,10 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       return
     end
 
-    let rem = ifdef windows then
-      _pending.size()
-    else
-      _pending_writev_total
-    end
-
     if
       not _shutdown and
       (_connect_count == 0) and
-      (rem == 0)
+      (_pending_writev_total == 0)
     then
       _shutdown = true
 
@@ -756,7 +856,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     ifdef windows then
       // On windows, wait until all outstanding IOCP operations have completed
       // or been cancelled.
-      if not _connected and not _readable and (_pending.size() == 0) then
+      if not _connected and not _readable and (_pending_sent == 0) then
         @pony_asio_event_unsubscribe(_event)
       end
     end
@@ -774,16 +874,21 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     _shutdown = true
     _shutdown_peer = true
 
+    _pending_writev_total = 0
+    ifdef windows then
+      _pending_writev_windows.clear()
+      _pending_sent = 0
+    else
+      _pending_writev_posix.clear()
+    end
+
     ifdef not windows then
       // Unsubscribe immediately and drop all pending writes.
       @pony_asio_event_unsubscribe(_event)
-      _pending_writev.clear()
-      _pending.clear()
-      _pending_writev_total = 0
       _readable = false
       _writeable = false
-      @pony_asio_event_set_readable[None](_event, false)
-      @pony_asio_event_set_writeable[None](_event, false)
+      @pony_asio_event_set_readable(_event, false)
+      @pony_asio_event_set_writeable(_event, false)
     end
 
     // On windows, this will also cancel all outstanding IOCP operations.
@@ -796,7 +901,18 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
 // the listener stuff
 //    try (_listen as TCPListener)._conn_closed() end
 
+
+  // Check this when a connection gets its first writeable event.
+  fun _is_sock_connected(fd: U32): Bool =>
+    (let errno: U32, let value: U32) = _OSSocket.get_so_error(fd)
+    (errno == 0) and (value == 0)
+
   fun ref _apply_backpressure() =>
+    if not _throttled then
+      _throttled = true
+      notify.throttled(_conn)
+    end
+
     ifdef not windows then
       _writeable = false
 
@@ -804,11 +920,6 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       // for a write event so will not be writing to the readable flag
       @pony_asio_event_set_writeable[None](_event, false)
       @pony_asio_event_resubscribe_write(_event)
-    end
-
-    if not _throttled then
-      _throttled = true
-      notify.throttled(_conn)
     end
 
   fun ref _release_backpressure() =>
@@ -824,3 +935,152 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
         _from.cstring())
       _notify_reconnecting()
     end
+
+  /**************************************/
+
+  fun ref getsockopt(level: I32, option_name: I32, option_max_size: USize = 4):
+    (U32, Array[U8] iso^) =>
+    """
+    General wrapper for TCP sockets to the `getsockopt(2)` system call.
+
+    The caller must provide an array that is pre-allocated to be
+    at least as large as the largest data structure that the kernel
+    may return for the requested option.
+
+    In case of system call success, this function returns the 2-tuple:
+    1. The integer `0`.
+    2. An `Array[U8]` of data returned by the system call's `void *`
+       4th argument.  Its size is specified by the kernel via the
+       system call's `sockopt_len_t *` 5th argument.
+
+    In case of system call failure, this function returns the 2-tuple:
+    1. The value of `errno`.
+    2. An undefined value that must be ignored.
+
+    Usage example:
+
+    ```pony
+    // connected() is a callback function for class TCPConnectionNotify
+    fun ref connected(conn: TCPConnection ref) =>
+      match conn.getsockopt(OSSockOpt.sol_socket(), OSSockOpt.so_rcvbuf(), 4)
+        | (0, let gbytes: Array[U8] iso) =>
+          try
+            let br = Reader.create().>append(consume gbytes)
+            ifdef littleendian then
+              let buffer_size = br.u32_le()?
+            else
+              let buffer_size = br.u32_be()?
+            end
+          end
+        | (let errno: U32, _) =>
+          // System call failed
+      end
+    ```
+    """
+    _OSSocket.getsockopt(_fd, level, option_name, option_max_size)
+
+  fun ref getsockopt_u32(level: I32, option_name: I32): (U32, U32) =>
+    """
+    Wrapper for TCP sockets to the `getsockopt(2)` system call where
+    the kernel's returned option value is a C `uint32_t` type / Pony
+    type `U32`.
+
+    In case of system call success, this function returns the 2-tuple:
+    1. The integer `0`.
+    2. The `*option_value` returned by the kernel converted to a Pony `U32`.
+
+    In case of system call failure, this function returns the 2-tuple:
+    1. The value of `errno`.
+    2. An undefined value that must be ignored.
+    """
+    _OSSocket.getsockopt_u32(_fd, level, option_name)
+
+  fun ref setsockopt(level: I32, option_name: I32, option: Array[U8]): U32 =>
+    """
+    General wrapper for TCP sockets to the `setsockopt(2)` system call.
+
+    The caller is responsible for the correct size and byte contents of
+    the `option` array for the requested `level` and `option_name`,
+    including using the appropriate machine endian byte order.
+
+    This function returns `0` on success, else the value of `errno` on
+    failure.
+
+    Usage example:
+
+    ```pony
+    // connected() is a callback function for class TCPConnectionNotify
+    fun ref connected(conn: TCPConnection ref) =>
+      let sb = Writer
+
+      sb.u32_le(7744)             // Our desired socket buffer size
+      let sbytes = Array[U8]
+      for bs in sb.done().values() do
+        sbytes.append(bs)
+      end
+      match conn.setsockopt(OSSockOpt.sol_socket(), OSSockOpt.so_rcvbuf(), sbytes)
+        | 0 =>
+          // System call was successful
+        | let errno: U32 =>
+          // System call failed
+      end
+    ```
+    """
+    _OSSocket.setsockopt(_fd, level, option_name, option)
+
+  fun ref setsockopt_u32(level: I32, option_name: I32, option: U32): U32 =>
+    """
+    General wrapper for TCP sockets to the `setsockopt(2)` system call where
+    the kernel expects an option value of a C `uint32_t` type / Pony
+    type `U32`.
+
+    This function returns `0` on success, else the value of `errno` on
+    failure.
+    """
+    _OSSocket.setsockopt_u32(_fd, level, option_name, option)
+
+
+  fun ref get_so_error(): (U32, U32) =>
+    """
+    Wrapper for the FFI call `getsockopt(fd, SOL_SOCKET, SO_ERROR, ...)`
+    """
+    _OSSocket.get_so_error(_fd)
+
+  fun ref get_so_rcvbuf(): (U32, U32) =>
+    """
+    Wrapper for the FFI call `getsockopt(fd, SOL_SOCKET, SO_RCVBUF, ...)`
+    """
+    _OSSocket.get_so_rcvbuf(_fd)
+
+  fun ref get_so_sndbuf(): (U32, U32) =>
+    """
+    Wrapper for the FFI call `getsockopt(fd, SOL_SOCKET, SO_SNDBUF, ...)`
+    """
+    _OSSocket.get_so_sndbuf(_fd)
+
+  fun ref get_tcp_nodelay(): (U32, U32) =>
+    """
+    Wrapper for the FFI call `getsockopt(fd, SOL_SOCKET, TCP_NODELAY, ...)`
+    """
+    _OSSocket.getsockopt_u32(_fd, OSSockOpt.sol_socket(), OSSockOpt.tcp_nodelay())
+
+
+  fun ref set_so_rcvbuf(bufsize: U32): U32 =>
+    """
+    Wrapper for the FFI call `setsockopt(fd, SOL_SOCKET, SO_RCVBUF, ...)`
+    """
+    _OSSocket.set_so_rcvbuf(_fd, bufsize)
+
+  fun ref set_so_sndbuf(bufsize: U32): U32 =>
+    """
+    Wrapper for the FFI call `setsockopt(fd, SOL_SOCKET, SO_SNDBUF, ...)`
+    """
+    _OSSocket.set_so_sndbuf(_fd, bufsize)
+
+  fun ref set_tcp_nodelay(state: Bool): U32 =>
+    """
+    Wrapper for the FFI call `setsockopt(fd, SOL_SOCKET, TCP_NODELAY, ...)`
+    """
+    var word: Array[U8] ref =
+      _OSSocket.u32_to_bytes4(if state then 1 else 0 end)
+    _OSSocket.setsockopt(_fd, OSSockOpt.sol_socket(), OSSockOpt.tcp_nodelay(), word)
