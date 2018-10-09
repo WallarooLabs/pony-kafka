@@ -50,6 +50,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   var _event: AsioEventID = AsioEvent.none()
   var _connected: Bool = false
   var _readable: Bool = false
+  var _reading: Bool = false
   var _writeable: Bool = false
   var _throttled: Bool = false
   var _closed: Bool = false
@@ -315,7 +316,9 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
 
     if _muted_downstream.size() == 0 then
       _muted = false
-      pending_reads()
+      if not _reading then
+        pending_reads()
+      end
     end
 
   fun ref set_notify(notify': CustomTCPConnectionNotify iso) =>
@@ -727,9 +730,11 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       try
         var sum: USize = 0
         var received_called: USize = 0
+        _reading = true
 
         while _readable and not _shutdown_peer do
           if _muted then
+            _reading = false
             return
           end
 
@@ -746,6 +751,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
             // for a read event so will not be writing to the readable flag
             @pony_asio_event_set_readable(_event, false)
             _readable = false
+            _reading = false
             @pony_asio_event_resubscribe_read(_event)
             return
           | _next_size =>
@@ -766,6 +772,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
             then
               _read_buf_size()
               _conn._read_again()
+              _reading = false
               return
             else
               _read_buf_size()
@@ -777,6 +784,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
           if sum >= _max_size then
             // If we've read _max_size, yield and read again later.
             _conn._read_again()
+            _reading = false
             return
           end
         end
@@ -786,6 +794,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
         close()
       end
     end
+
+    _reading = false
 
   fun ref _notify_connecting() =>
     """
