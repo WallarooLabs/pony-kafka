@@ -27,11 +27,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-// TODO: turn this into a `trait` so different types of implementations
-// can be made for it (i.e. one that is `iso` only that supports full
-// overwriteability; one that is `val` only and doesn't support
-// overwriting at all; another that supports partial overwrite
-// functionality)? this would be similar to the `reader` stuff
 class PartiallyOverwriteableWriter is OverwriteableWriter
   """
   A buffer for building messages.

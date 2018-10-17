@@ -554,7 +554,7 @@ primitive _KafkaMessageSetCodecV0V1
     compressed_message_set: Bool = false)
   =>
     let logger = conf.logger
-    let wb_msgs = recover ref Writer end
+    let wb_msgs = recover ref PartiallyOverwriteableWriter end
 
     var offset: KafkaOffset = 0
 
@@ -691,7 +691,7 @@ primitive _KafkaMessageSetCodecV0V1
     let magic_byte = version
     let attributes = compression()
 
-    let wb_temp = recover ref Writer end
+    let wb_temp = recover ref PartiallyOverwriteableWriter end
 
     _KafkaI8Codec.encode(wb_temp, magic_byte)
     _KafkaI8Codec.encode(wb_temp, attributes)
@@ -1613,12 +1613,12 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val, msgs:
     Map[String, Map[KafkaPartitionId, Array[ProducerKafkaMessage val]]]): Array[ByteSeq] iso^
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     encode_request_body(wb, conf, msgs where message_set_version = 0)
 
-    let wb_msg = recover ref Writer end
+    let wb_msg = recover ref PartiallyOverwriteableWriter end
     _KafkaI32Codec.encode(wb_msg, wb.size().i32())
     wb_msg.writev(wb.done())
     wb_msg.done()
@@ -1698,7 +1698,7 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
         (let largest_offset_seen, let messages) =
           _KafkaMessageSetCodecV0V1.decode(broker_conn, logger,
           KafkaTopicPartition(topic, partition_id),
-          rb.block(message_set_size.usize())?, None
+          rb.read_block(message_set_size.usize())?, None
           where err_str = "error decoding messages")
 
         topic_msgs(partition_id) = consume val messages
@@ -1789,13 +1789,13 @@ primitive _KafkaProduceV1 is _KafkaProduceApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val, msgs:
     Map[String, Map[KafkaPartitionId, Array[ProducerKafkaMessage val]]]): Array[ByteSeq] iso^
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     _KafkaProduceV0.encode_request_body(wb, conf, msgs where message_set_version
        = 0)
 
-    let wb_msg = recover ref Writer end
+    let wb_msg = recover ref PartiallyOverwriteableWriter end
     _KafkaI32Codec.encode(wb_msg, wb.size().i32())
     wb_msg.writev(wb.done())
     wb_msg.done()
@@ -1844,13 +1844,13 @@ primitive _KafkaProduceV2 is _KafkaProduceApi
     msgs: Map[String, Map[KafkaPartitionId, Array[ProducerKafkaMessage val]]]):
     Array[ByteSeq] iso^
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     _KafkaProduceV0.encode_request_body(wb, conf, msgs where message_set_version
        = 1)
 
-    let wb_msg = recover ref Writer end
+    let wb_msg = recover ref PartiallyOverwriteableWriter end
     _KafkaI32Codec.encode(wb_msg, wb.size().i32())
     wb_msg.writev(wb.done())
     wb_msg.done()
@@ -1939,7 +1939,7 @@ primitive _KafkaFetchV0 is _KafkaFetchApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val, topics_state:
     Map[String, _KafkaTopicState], rng: Random): (Array[ByteSeq] iso^ | None)
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     let num_topics_encoded = encode_request_body(wb, conf, topics_state, rng)
@@ -1947,7 +1947,7 @@ primitive _KafkaFetchV0 is _KafkaFetchApi
     if num_topics_encoded == 0 then
       None
     else
-      let wb_msg = recover ref Writer end
+      let wb_msg = recover ref PartiallyOverwriteableWriter end
       _KafkaI32Codec.encode(wb_msg, wb.size().i32())
       wb_msg.writev(wb.done())
       wb_msg.done()
@@ -1958,7 +1958,7 @@ primitive _KafkaFetchV0 is _KafkaFetchApi
   =>
     conf.logger(Fine) and conf.logger.log(Fine,
       "Encoding request body for fetch request")
-    let wb_topics = recover ref Writer end
+    let wb_topics = recover ref PartiallyOverwriteableWriter end
     var num_topics_encoded: I32 = 0
 
     // shuffle keys before encoding for fetch request to prevent single topic
@@ -2006,7 +2006,7 @@ primitive _KafkaFetchV0 is _KafkaFetchApi
   fun encode_topic_partitions(conf: KafkaConfig val, wb: Writer, topic: String,
     parts_state: Map[KafkaPartitionId, _KafkaTopicPartitionState], rng: Random): I32
   =>
-    let wb_partitions = recover ref Writer end
+    let wb_partitions = recover ref PartiallyOverwriteableWriter end
     var num_partitions_encoded: I32 = 0
 
     // shuffle keys before encoding for fetch request to prevent single partition
@@ -2135,7 +2135,7 @@ primitive _KafkaFetchV1 is _KafkaFetchApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val, topics_state:
     Map[String, _KafkaTopicState], rng: Random): (Array[ByteSeq] iso^ | None)
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     let num_topics_encoded = _KafkaFetchV0.encode_request_body(wb, conf,
@@ -2144,7 +2144,7 @@ primitive _KafkaFetchV1 is _KafkaFetchApi
     if num_topics_encoded == 0 then
       None
     else
-      let wb_msg = recover ref Writer end
+      let wb_msg = recover ref PartiallyOverwriteableWriter end
       _KafkaI32Codec.encode(wb_msg, wb.size().i32())
       wb_msg.writev(wb.done())
       wb_msg.done()
@@ -2171,7 +2171,7 @@ primitive _KafkaFetchV2 is _KafkaFetchApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val, topics_state:
     Map[String, _KafkaTopicState], rng: Random): (Array[ByteSeq] iso^ | None)
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     let num_topics_encoded = _KafkaFetchV0.encode_request_body(wb, conf,
@@ -2180,7 +2180,7 @@ primitive _KafkaFetchV2 is _KafkaFetchApi
     if num_topics_encoded == 0 then
       None
     else
-      let wb_msg = recover ref Writer end
+      let wb_msg = recover ref PartiallyOverwriteableWriter end
       _KafkaI32Codec.encode(wb_msg, wb.size().i32())
       wb_msg.writev(wb.done())
       wb_msg.done()
@@ -2202,7 +2202,7 @@ primitive _KafkaFetchV3 is _KafkaFetchApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val, topics_state:
     Map[String, _KafkaTopicState], rng: Random): (Array[ByteSeq] iso^ | None)
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     let num_topics_encoded = encode_request_body(wb, conf, topics_state, rng)
@@ -2210,7 +2210,7 @@ primitive _KafkaFetchV3 is _KafkaFetchApi
     if num_topics_encoded == 0 then
       None
     else
-      let wb_msg = recover ref Writer end
+      let wb_msg = recover ref PartiallyOverwriteableWriter end
       _KafkaI32Codec.encode(wb_msg, wb.size().i32())
       wb_msg.writev(wb.done())
       wb_msg.done()
@@ -2221,7 +2221,7 @@ primitive _KafkaFetchV3 is _KafkaFetchApi
   =>
     conf.logger(Fine) and conf.logger.log(Fine,
       "Encoding request body for fetch request")
-    let wb_topics = recover ref Writer end
+    let wb_topics = recover ref PartiallyOverwriteableWriter end
     var num_topics_encoded: I32 = 0
 
     // shuffle keys before encoding for fetch request to prevent single topic
@@ -2298,12 +2298,12 @@ primitive _KafkaOffsetsV0 is _KafkaOffsetsApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val,
     topics_state: Map[String, _KafkaTopicState] box): Array[ByteSeq] iso^
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     encode_request_body(wb, conf, topics_state)
 
-    let wb_msg = recover ref Writer end
+    let wb_msg = recover ref PartiallyOverwriteableWriter end
     _KafkaI32Codec.encode(wb_msg, wb.size().i32())
     wb_msg.writev(wb.done())
     wb_msg.done()
@@ -2314,7 +2314,7 @@ primitive _KafkaOffsetsV0 is _KafkaOffsetsApi
     conf.logger(Fine) and conf.logger.log(Fine,
       "Encoding request body for offsets request")
 
-    let wb_topics = recover ref Writer end
+    let wb_topics = recover ref PartiallyOverwriteableWriter end
     var num_topics_encoded: I32 = 0
     for (topic, topic_state) in topics_state.pairs() do
       let num_partitions_encoded = encode_topic_partitions(wb_topics, conf,
@@ -2331,7 +2331,7 @@ primitive _KafkaOffsetsV0 is _KafkaOffsetsApi
   fun encode_topic_partitions(wb: Writer, conf: KafkaConfig val, topic: String,
     parts_state: Map[KafkaPartitionId, _KafkaTopicPartitionState] box): I32
   =>
-    let wb_partitions = recover ref Writer end
+    let wb_partitions = recover ref PartiallyOverwriteableWriter end
     var num_partitions_encoded: I32 = 0
     for (part_id, part_state) in parts_state.pairs() do
       if (not part_state.current_leader) then
@@ -2467,12 +2467,12 @@ primitive _KafkaOffsetsV1 is _KafkaOffsetsApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val, topics_state:
     Map[String, _KafkaTopicState] box): Array[ByteSeq] iso^
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     encode_request_body(wb, conf, topics_state)
 
-    let wb_msg = recover ref Writer end
+    let wb_msg = recover ref PartiallyOverwriteableWriter end
     _KafkaI32Codec.encode(wb_msg, wb.size().i32())
     wb_msg.writev(wb.done())
     wb_msg.done()
@@ -2482,7 +2482,7 @@ primitive _KafkaOffsetsV1 is _KafkaOffsetsApi
     conf.logger(Fine) and conf.logger.log(Fine,
       "Encoding request body for offsets request")
 
-    let wb_topics = recover ref Writer end
+    let wb_topics = recover ref PartiallyOverwriteableWriter end
     var num_topics_encoded: I32 = 0
     for (topic, topic_state) in topics_state.pairs() do
       let num_partitions_encoded = encode_topic_partitions(wb_topics, conf,
@@ -2499,7 +2499,7 @@ primitive _KafkaOffsetsV1 is _KafkaOffsetsApi
   fun encode_topic_partitions(wb: Writer, conf: KafkaConfig val, topic: String,
     parts_state: Map[KafkaPartitionId, _KafkaTopicPartitionState] box): I32
   =>
-    let wb_partitions = recover ref Writer end
+    let wb_partitions = recover ref PartiallyOverwriteableWriter end
     var num_partitions_encoded: I32 = 0
     for (part_id, part_state) in parts_state.pairs() do
       if (not part_state.current_leader) then
@@ -2637,12 +2637,12 @@ primitive _KafkaMetadataV0 is _KafkaMetadataApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val):
     Array[ByteSeq] iso^
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     encode_request_body(wb, conf)
 
-    let wb_msg = recover ref Writer end
+    let wb_msg = recover ref PartiallyOverwriteableWriter end
     _KafkaI32Codec.encode(wb_msg, wb.size().i32())
     wb_msg.writev(wb.done())
     wb_msg.done()
@@ -2770,12 +2770,12 @@ primitive _KafkaMetadataV1 is _KafkaMetadataApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val):
     Array[ByteSeq] iso^
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     encode_request_body(wb, conf)
 
-    let wb_msg = recover ref Writer end
+    let wb_msg = recover ref PartiallyOverwriteableWriter end
     _KafkaI32Codec.encode(wb_msg, wb.size().i32())
     wb_msg.writev(wb.done())
     wb_msg.done()
@@ -2869,12 +2869,12 @@ primitive _KafkaMetadataV2 is _KafkaMetadataApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val):
     Array[ByteSeq] iso^
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
 
     _KafkaMetadataV1.encode_request_body(wb, conf)
 
-    let wb_msg = recover ref Writer end
+    let wb_msg = recover ref PartiallyOverwriteableWriter end
     _KafkaI32Codec.encode(wb_msg, wb.size().i32())
     wb_msg.writev(wb.done())
     wb_msg.done()
@@ -3132,7 +3132,7 @@ primitive _KafkaApiVersionsV0 is _KafkaApiVersionsApi
   fun encode_request(correlation_id: KafkaCorrelationId, conf: KafkaConfig val):
     Array[ByteSeq] iso^
   =>
-    let wb = recover ref Writer end
+    let wb = recover ref PartiallyOverwriteableWriter end
     let size: I32 = 10 + conf.client_name.size().i32()
     _KafkaI32Codec.encode(wb, size)
     _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)

@@ -58,7 +58,6 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   var _shutdown_peer: Bool = false
   var _in_sent: Bool = false
 
-
   embed _pending_writev_posix: Array[(Pointer[U8] tag, USize)] = _pending_writev_posix.create()
   embed _pending_writev_windows: Array[(USize, Pointer[U8] tag)] = _pending_writev_windows.create()
 
@@ -66,15 +65,16 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   var _pending_writev_total: USize = 0
 
   var _read_buf: Array[U8] iso
+  var _read_buf_offset: USize = 0
+  var _max_received_count: USize = 50
 
   var _next_size: USize
   let _max_size: USize
 
-  var _read_len: USize = 0
   var _expect: USize = 0
 
   var _muted: Bool = false
-  let _muted_downstream: SetIs[Any tag] = _muted_downstream.create()
+  let _muted_by: SetIs[Any tag] = _muted_by.create()
 
   let _conn: CustomTCPConnection
 
@@ -268,7 +268,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
           _pending_writev_total = _pending_writev_total + bytes.size()
         end
 
-        _pending_writes()
+        pending_writes()
       end
 
       _in_sent = false
@@ -295,7 +295,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     Compile error on windows.
     """
     ifdef not windows then
-      _pending_writes()
+      pending_writes()
     else
       compile_error "no queueing on windows"
     end
@@ -305,16 +305,16 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     Temporarily suspend reading off this TCPConnection until such time as
     `unmute` is called.
     """
-    _muted_downstream.set(d)
+    _muted_by.set(d)
     _muted = true
 
   fun ref unmute(d: Any tag) =>
     """
     Start reading off this TCPConnection again after having been muted.
     """
-    _muted_downstream.unset(d)
+    _muted_by.unset(d)
 
-    if _muted_downstream.size() == 0 then
+    if _muted_by.size() == 0 then
       _muted = false
       if not _reading then
         pending_reads()
@@ -433,7 +433,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
             // Don't call _complete_writes, as Windows will see this as a
             // closed connection.
             ifdef not windows then
-              if _pending_writes() then
+              if pending_writes() then
                 // Sent all data; release backpressure
                 _release_backpressure()
               end
@@ -465,7 +465,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
           _writeable = true
           _complete_writes(arg)
             ifdef not windows then
-              if _pending_writes() then
+              if pending_writes() then
                 // Sent all data; release backpressure
                 _release_backpressure()
               end
@@ -516,7 +516,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       else
         _pending_writev_posix .> push((data.cpointer(), data.size()))
         _pending_writev_total = _pending_writev_total + data.size()
-        _pending_writes()
+        pending_writes()
       end
     end
 
@@ -545,7 +545,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       end
     end
 
-  fun ref _pending_writes(): Bool =>
+  fun ref pending_writes(): Bool =>
     """
     Send pending data. If any data can't be sent, keep it and mark as not
     writeable. On an error, dispose of the connection. Returns whether
@@ -556,7 +556,12 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       let writev_batch_size: USize = @pony_os_writev_max[I32]().usize()
       var num_to_send: USize = 0
       var bytes_to_send: USize = 0
+      var bytes_sent: USize = 0
       while _writeable and not _shutdown_peer and (_pending_writev_total > 0) do
+        if bytes_sent > _max_size then
+          _conn._write_again()
+          return false
+        end
         try
           // Determine number of bytes and buffers to send.
           if _pending_writev_posix.size() < writev_batch_size then
@@ -579,6 +584,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
           if _manage_pending_buffer(len, bytes_to_send, num_to_send)? then
             return true
           end
+
+          bytes_sent = bytes_sent + len
         else
           // Non-graceful shutdown on error.
           _hard_close()
@@ -681,12 +688,12 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
         _next_size = _max_size.min(_next_size * 2)
       end
 
-      _read_len = _read_len + len.usize()
+      _read_buf_offset = _read_buf_offset + len.usize()
 
-      if (not _muted) and (_read_len >= _expect) then
+      if (not _muted) and (_read_buf_offset >= _expect) then
         let data = _read_buf = recover Array[U8] end
-        data.truncate(_read_len)
-        _read_len = 0
+        data.truncate(_read_buf_offset)
+        _read_buf_offset = 0
 
         notify.received(_conn, consume data, 1)
         _read_buf_size()
@@ -700,7 +707,7 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
     Resize the read buffer.
     """
     if _expect != 0 then
-      _read_buf.undefined(_expect)
+      _read_buf.undefined(_expect.next_pow2().max(_next_size))
     else
       _read_buf.undefined(_next_size)
     end
@@ -713,8 +720,8 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
       try
         @pony_os_recv[USize](
           _event,
-          _read_buf.cpointer(_read_len),
-          _read_buf.size() - _read_len) ?
+          _read_buf.cpointer(_read_buf_offset),
+          _read_buf.size() - _read_buf_offset) ?
       else
         _hard_close()
       end
@@ -723,75 +730,98 @@ class CustomTCPConnectionHandler is TCPConnectionHandler
   fun ref pending_reads() =>
     """
     Unless this connection is currently muted, read while data is available,
-    guessing the next packet length as we go. If we read 4 kb of data, send
+    guessing the next packet length as we go. If we read 5 kb of data, send
     ourself a resume message and stop reading, to avoid starving other actors.
+    Currently we can handle a varying value of _expect (greater than 0) and
+    constant _expect of 0 but we cannot handle switching between these two
+    cases.
     """
     ifdef not windows then
       try
         var sum: USize = 0
-        var received_called: USize = 0
+        var received_count: USize = 0
         _reading = true
 
         while _readable and not _shutdown_peer do
+          // exit if muted
           if _muted then
             _reading = false
             return
           end
 
+          // distribute the data we've already read that is in the `read_buf`
+          // and able to be distributed
+          while (_read_buf_offset >= _expect) and (_read_buf_offset > 0) do
+            // get data to be distributed and update `_read_buf_offset`
+            let data =
+              if _expect == 0 then
+                let data' = _read_buf = recover Array[U8] end
+                data'.truncate(_read_buf_offset)
+                _read_buf_offset = 0
+                consume data'
+              else
+                let x = _read_buf = recover Array[U8] end
+                (let data', _read_buf) = (consume x).chop(_expect)
+                _read_buf_offset = _read_buf_offset - _expect
+                consume data'
+              end
+
+            // increment max reads
+            received_count = received_count + 1
+
+            // check if we should yield to let another actor run
+            if (not notify.received(_conn, consume data,
+              received_count))
+              or (received_count >= _max_received_count)
+            then
+              _read_buf_size()
+              _conn._read_again()
+              _reading = false
+              return
+            end
+          end
+
+          if sum >= _max_size then
+            // If we've read _max_size, yield and read again later.
+            _read_buf_size()
+            _conn._read_again()
+            _reading = false
+            return
+          end
+
+          // make sure we have enough space to read enough data for _expect
+          if _read_buf.size() < _expect then
+            _read_buf_size()
+          end
+
           // Read as much data as possible.
           let len = @pony_os_recv[USize](
             _event,
-            _read_buf.cpointer(_read_len),
-            _read_buf.size() - _read_len) ?
+            _read_buf.cpointer(_read_buf_offset),
+            _read_buf.size() - _read_buf_offset) ?
 
           match len
           | 0 =>
             // Would block, try again later.
             // this is safe because asio thread isn't currently subscribed
             // for a read event so will not be writing to the readable flag
-            @pony_asio_event_set_readable(_event, false)
+            @pony_asio_event_set_readable[None](_event, false)
             _readable = false
             _reading = false
             @pony_asio_event_resubscribe_read(_event)
             return
-          | _next_size =>
+          | (_read_buf.size() - _read_buf_offset) =>
             // Increase the read buffer size.
             _next_size = _max_size.min(_next_size * 2)
           end
 
-          _read_len = _read_len + len
-
-          if _read_len >= _expect then
-            let data = _read_buf = recover Array[U8] end
-            data.truncate(_read_len)
-            _read_len = 0
-
-            received_called = received_called + 1
-            if not notify.received(_conn, consume data,
-              received_called)
-            then
-              _read_buf_size()
-              _conn._read_again()
-              _reading = false
-              return
-            else
-              _read_buf_size()
-            end
-          end
-
+          _read_buf_offset = _read_buf_offset + len
           sum = sum + len
-
-          if sum >= _max_size then
-            // If we've read _max_size, yield and read again later.
-            _conn._read_again()
-            _reading = false
-            return
-          end
         end
       else
         // The socket has been closed from the other side.
         _shutdown_peer = true
-        close()
+        _hard_close()
       end
     end
 

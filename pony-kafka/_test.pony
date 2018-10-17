@@ -216,7 +216,7 @@ primitive _RunOffsetsApiTest
     end
 
     let rb = recover ref IsoReader end
-    rb.append(r.block(r.size())?)
+    rb.append(r.read_block(r.size())?)
 
     let remaining_size = _KafkaI32Codec.decode(logger, rb,
       "error decoding size")?
@@ -288,7 +288,7 @@ primitive _RunProduceApiTest
     end
 
     let rb = recover ref IsoReader end
-    rb.append(vr.block(vr.size())?)
+    rb.append(vr.read_block(vr.size())?)
 
     let remaining_size = _KafkaI32Codec.decode(logger, rb,
       "error decoding size")?
@@ -332,7 +332,7 @@ primitive _RunProduceApiTest
               end
             end
             h.assert_true(ByteSeqComparator.eq(value',
-              r.block(r.size())?)?)
+              r.read_block(r.size())?)?)
           end
           match m.get_key()
           | let b: ByteSeq =>
@@ -353,7 +353,7 @@ primitive _RunProduceApiTest
             end
             match key'
             | let k': (ByteSeq | None) =>
-              h.assert_true(KeyComparator.eq(k', r.block(r.size())?)?)
+              h.assert_true(KeyComparator.eq(k', r.read_block(r.size())?)?)
             else
               // force failure because KafkaError
               h.assert_true(false)

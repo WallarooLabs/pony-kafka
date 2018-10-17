@@ -102,6 +102,12 @@ trait CustomTCPConnection
     """
     get_handler().pending_reads()
 
+  be _write_again() =>
+    """
+    Resume writes.
+    """
+    get_handler().pending_writes()
+
   fun ref expect(qty: USize = 0) =>
     """
     A `received` call on the notifier must contain exactly `qty` bytes. If

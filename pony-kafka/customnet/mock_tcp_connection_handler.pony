@@ -106,6 +106,14 @@ class MockTCPConnectionHandler is TCPConnectionHandler
     """
     None
 
+  fun ref pending_writes(): Bool =>
+    """
+    Send pending data. If any data can't be sent, keep it and mark as not
+    writeable. On an error, dispose of the connection. Returns whether
+    it sent all pending data or not.
+    """
+    true
+
   fun ref expect(qty: USize = 0) =>
     """
     A `received` call on the notifier must contain exactly `qty` bytes. If
