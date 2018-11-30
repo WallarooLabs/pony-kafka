@@ -1614,14 +1614,46 @@ primitive _KafkaProduceV0 is _KafkaProduceApi
     Map[String, Map[KafkaPartitionId, Array[ProducerKafkaMessage val]]]): Array[ByteSeq] iso^
   =>
     let wb = recover ref PartiallyOverwriteableWriter end
-    _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
+    _KafkaI32Codec.encode(wb, 0)
+    try
+      wb.save_overwriteable()?
+      _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
+      encode_request_body(wb, conf, msgs where message_set_version = 0)
 
-    encode_request_body(wb, conf, msgs where message_set_version = 0)
 
-    let wb_msg = recover ref PartiallyOverwriteableWriter end
-    _KafkaI32Codec.encode(wb_msg, wb.size().i32())
-    wb_msg.writev(wb.done())
-    wb_msg.done()
+      // how to do overwrite stuff cleanly???
+      // ideally, codec doesn't care whether it's writing new or overwriting existing
+      // how to encapsulate cleanly/with minimal overhead
+      // how to deal with fact that writing doesn't throw an error by overwriting might??!?!?!??
+      // allow writes to throw an error???
+      // this creates unnecessary annoyances when writing data
+      // have a primitive that does a write or an overwrite with
+      // the codec returning a encoded version of the datatype only (i.e. U32, U64, etc)?
+      // this would allow for mulitple primitives for writing to different types of targets (appending to writer, overwriting a writer, appending to an array[U8], etc) effectively making arrays/writers interchangeable
+      // how does this work with varint types where there's no real data type but instead bytes to be written? maybe they always return a U64 + a number of bytes to write (starting from msb)?
+      // figure out a way to write a full U64 but only increment a subset of bytes? this would be most efficient possibly...
+      // maybe change the "save overwriteable" to allow to replace the first `iso` array overall? can add elements/remove elements/etc and  not just overwrite them?
+      // maybe allow for the writer to have a "prepend_current" instead of the default "append_current" as an option? although this gets very confusing very quickly
+      _KafkaI32Codec.encode(wb.overwrite, wb.size().i32() - 4)
+
+      wb_msg.done()
+    else
+      conf.logger(Error) and conf.logger.log(Error,
+        "Error "saving overwriteable" in write buffer. This should never happen.")
+
+      // need the equivalent of a `Fail()` or something from wallaroo here
+
+      wb.clear()
+
+      _KafkaRequestHeader.encode(wb, api_key(), version(), correlation_id, conf)
+
+      encode_request_body(wb, conf, msgs where message_set_version = 0)
+
+      let wb_msg = recover ref PartiallyOverwriteableWriter end
+      _KafkaI32Codec.encode(wb_msg, wb.size().i32())
+      wb_msg.writev(wb.done())
+      wb_msg.done()
+    end
 
   fun encode_request_body(wb: Writer, conf: KafkaConfig val, msgs: Map[String,
     Map[KafkaPartitionId, Array[ProducerKafkaMessage val]]], message_set_version: KafkaApiMessageSetVersion)
