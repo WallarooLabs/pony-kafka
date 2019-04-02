@@ -244,8 +244,9 @@ actor C is KafkaConsumer
       else
         "\n"
       end
-
-    @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Consuming data. Waiting for: " + num_msgs.string() + " messages." + latency_message).cstring())
+    try
+      @printf[I32]((PosixDate(Time.seconds()).format("%Y-%m-%d %H:%M:%S")? + ": Consuming data. Waiting for: " + num_msgs.string() + " messages." + latency_message).cstring())
+    end
 
   // behavior kafka calls for each message received that should be sent to this
   // actor
@@ -272,14 +273,18 @@ actor C is KafkaConsumer
 
     ifdef debug then
       if (num_msgs_consumed % 100000) == 0 then
-        @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received " + num_msgs_consumed.string() + " messages so far\n").cstring())
+        try
+          @printf[I32]((PosixDate(Time.seconds()).format("%Y-%m-%d %H:%M:%S")? + ": Received " + num_msgs_consumed.string() + " messages so far\n").cstring())
+        end
       end
     end
 
     if num_msgs_consumed == num_msgs then
       let end_ts = Time.nanos()
       let time_taken = (end_ts - start_ts).f64()/1_000_000_000.0
-      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received " + num_msgs_consumed.string() + " messages as requested. Time taken: " + time_taken.string() + " seconds. Throughput: " + (num_msgs_consumed.f64()/time_taken.f64()).string() + "/sec.\n").cstring())
+      try
+        @printf[I32]((PosixDate(Time.seconds()).format("%Y-%m-%d %H:%M:%S")? + ": Received " + num_msgs_consumed.string() + " messages as requested. Time taken: " + time_taken.string() + " seconds. Throughput: " + (num_msgs_consumed.f64()/time_taken.f64()).string() + "/sec.\n").cstring())
+      end
 
       if measure_latency then
         // TODO: Add in logic to print latency histogram
@@ -362,7 +367,9 @@ actor P is KafkaProducer
     end
 
   be kafka_producer_ready(client: KafkaClient) =>
-    @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Producing data\n").cstring())
+    try
+      @printf[I32]((PosixDate(Time.seconds()).format("%Y-%m-%d %H:%M:%S")? + ": Producing data\n").cstring())
+    end
     start_ts = Time.nanos()
     produce_data()
 
@@ -383,7 +390,9 @@ actor P is KafkaProducer
     if num_msgs_produced_acked == num_msgs then
       let end_ts = Time.nanos()
       let time_taken = (end_ts - start_ts).f64()/1_000_000_000.0
-      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Received acks for all " + num_msgs_produced_acked.string() + " messages produced. num_errors: " + num_errors.string() + ". Time taken: " + time_taken.string() + " seconds. Throughput: " + (num_msgs_produced_acked.f64()/time_taken.f64()).string() + "/sec.\n").cstring())
+      try
+        @printf[I32]((PosixDate(Time.seconds()).format("%Y-%m-%d %H:%M:%S")? + ": Received acks for all " + num_msgs_produced_acked.string() + " messages produced. num_errors: " + num_errors.string() + ". Time taken: " + time_taken.string() + " seconds. Throughput: " + (num_msgs_produced_acked.f64()/time_taken.f64()).string() + "/sec.\n").cstring())
+      end
       @printf[I32]("Shutting down\n".cstring())
       _kc.dispose()
     end
@@ -453,6 +462,8 @@ actor P is KafkaProducer
         _kc.dispose()
       end
     else
-      @printf[I32]((Date(Time.seconds()).format("%Y-%m-%d %H:%M:%S") + ": Done producing data\n").cstring())
+      try
+        @printf[I32]((PosixDate(Time.seconds()).format("%Y-%m-%d %H:%M:%S")? + ": Done producing data\n").cstring())
+      end
     end
 
